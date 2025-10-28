@@ -1,0 +1,8 @@
+# Add your Python dependencies here
+streamlit
+plotly
+
+# For real-time extraction and Kafka integration
+kafka-python
+google-play-scraper
+praw

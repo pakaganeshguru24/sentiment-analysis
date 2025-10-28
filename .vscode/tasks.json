@@ -1,0 +1,35 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Start Kafka & Zookeeper",
+            "type": "shell",
+            "command": "docker-compose up -d",
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "Run Multi-Source Extractor",
+            "type": "shell",
+            "command": "d:/Sentiment-Analysis/.venv/Scripts/python.exe",
+            "args": [
+                "d:/Sentiment-Analysis/galaxy_s25_sentiment/extract/multi_source_extract.py"
+            ],
+            "dependsOn": "Start Kafka & Zookeeper",
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "Run Streamlit Dashboard",
+            "type": "shell",
+            "command": "d:/Sentiment-Analysis/.venv/Scripts/streamlit.exe",
+            "args": [
+                "run",
+                "d:/Sentiment-Analysis/galaxy_s25_sentiment/dashboard/app.py"
+            ],
+            "dependsOn": "Run Multi-Source Extractor",
+            "group": "build",
+            "problemMatcher": []
+        }
+    ]
+}
