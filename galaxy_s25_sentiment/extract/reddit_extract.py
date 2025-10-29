@@ -6,9 +6,10 @@ import praw
 from kafka import KafkaProducer
 
 # 🔹 Reddit API credentials
-CLIENT_ID = os.environ.get("REDDIT_CLIENT_ID", "DWBQ_jLR87O2tPu_X5hN8w")
-CLIENT_SECRET = os.environ.get("REDDIT_CLIENT_SECRET", "hSs06uR4gi0OmWtK4tMXTrvA0Vh1dw")
-USER_AGENT = os.environ.get("REDDIT_USER_AGENT", "galaxy_s25_sentiment")
+CLIENT_ID = os.environ.get("REDDIT_CLIENT_ID", "XWB0jgmqRO7NFJCeb8_IUg")
+CLIENT_SECRET = os.environ.get("REDDIT_CLIENT_SECRET", "3KAx-qhzBo3EZYeZ3JRy5Q03eo38nA")
+USER_AGENT = os.environ.get("REDDIT_USER_AGENT", "sentiment_dashboard:v1.0 (by u/ganesh guru)")
+
 
 # 🔹 Kafka settings (env vars supported)
 KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "localhost:9092")
