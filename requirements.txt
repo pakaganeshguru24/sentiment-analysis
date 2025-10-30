@@ -1,0 +1,13 @@
+# Add your Python dependencies here
+streamlit
+plotly
+numpy
+pandas
+selenium
+webdriver-manager
+google-search-results
+
+# For real-time extraction and Kafka integration
+kafka-python
+google-play-scraper
+praw
