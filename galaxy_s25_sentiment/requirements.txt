@@ -1,13 +1,26 @@
-# Add your Python dependencies here
-streamlit
-plotly
-numpy
-pandas
-selenium
-webdriver-manager
-google-search-results
+# Core Data & Visualization
+streamlit>=1.28.0
+plotly>=5.14.0
+numpy>=1.24.0
+pandas>=2.0.0
 
-# For real-time extraction and Kafka integration
-kafka-python
-google-play-scraper
-praw
+# Web Scraping & Data Extraction
+selenium>=4.10.0
+webdriver-manager>=3.8.0
+google-search-results>=2.4.2
+google-play-scraper>=1.1.1
+praw>=7.7.0
+beautifulsoup4>=4.12.0
+requests>=2.31.0
+
+# Real-time Streaming & Kafka
+kafka-python>=2.0.2
+
+# Sentiment Analysis
+vaderSentiment>=3.3.2
+
+# Database
+psycopg2-binary>=2.9.9
+
+# Environment Management
+python-dotenv>=1.0.0

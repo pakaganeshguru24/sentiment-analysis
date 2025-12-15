@@ -3,11 +3,14 @@ import os
 import sys
 import json
 import argparse
-from datetime import datetime
+from datetime import datetime, timezone
+from dotenv import load_dotenv
 from kafka import KafkaProducer
 from google_play_scraper import reviews, Sort
 import praw
 
+# Load environment variables first
+load_dotenv(override=True)
 
 KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "localhost:9092")
 KAFKA_TOPIC = os.environ.get("KAFKA_TOPIC", "sentiment-stream")
@@ -60,14 +63,21 @@ def extract_google(producer, app_id: str, topic: str, count: int = 100):
 def extract_reddit(producer, query: str, subreddit: str = "all", count: int = 50):
     """Extract Reddit posts for any query/subreddit."""
     try:
-        CLIENT_ID = os.environ.get("REDDIT_CLIENT_ID", "DWBQ_jLR87O2tPu_X5hN8w")
-        CLIENT_SECRET = os.environ.get("REDDIT_CLIENT_SECRET", "hSs06uR4gi0OmWtK4tMXTrvA0Vh1dw")
+        CLIENT_ID = os.environ.get("REDDIT_CLIENT_ID")
+        CLIENT_SECRET = os.environ.get("REDDIT_CLIENT_SECRET")
         USER_AGENT = os.environ.get("REDDIT_USER_AGENT", "sentiment_analysis")
+        USERNAME = os.environ.get("REDDIT_USERNAME")
+        PASSWORD = os.environ.get("REDDIT_PASSWORD")
+
+        if not CLIENT_ID or not CLIENT_SECRET:
+            raise RuntimeError("❌ Missing Reddit credentials in environment variables")
 
         reddit = praw.Reddit(
             client_id=CLIENT_ID,
             client_secret=CLIENT_SECRET,
-            user_agent=USER_AGENT
+            user_agent=USER_AGENT,
+            username=USERNAME if USERNAME else None,
+            password=PASSWORD if PASSWORD else None
         )
 
         subreddit_obj = reddit.subreddit(subreddit)
@@ -80,7 +90,7 @@ def extract_reddit(producer, query: str, subreddit: str = "all", count: int = 50
                 "title": post.title,
                 "text": text,
                 "score": post.score,
-                "at": datetime.utcfromtimestamp(post.created_utc).isoformat(),
+                "at": datetime.fromtimestamp(post.created_utc, tz=timezone.utc).isoformat(),
                 "source": "reddit",
                 "topic": query,
                 "subreddit": subreddit

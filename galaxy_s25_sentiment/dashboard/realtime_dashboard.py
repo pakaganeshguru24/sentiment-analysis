@@ -1,53 +1,3 @@
-import io
-import json
-import os
-import time
-from datetime import datetime
-from typing import Any, Dict, List
-
-import numpy as np
-import pandas as pd
-import plotly.express as px
-import streamlit as st
-from kafka import KafkaConsumer
-from pandas.api.types import is_bool_dtype, is_numeric_dtype
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
-
-# -----------------------
-# Configuration
-# -----------------------
-KAFKA_TOPIC = os.environ.get("KAFKA_TOPIC", "sentiment-stream")
-KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "localhost:9092")
-GROUP_ID = os.environ.get("KAFKA_GROUP_ID", "streamlit-dashboard")
-MAX_HISTORY = 500
-MAX_FETCH = 200
-DEFAULT_REFRESH_SECONDS = 5
-KAFKA_TOPICS = os.environ.get("KAFKA_TOPICS")
-CONSUMER_TOPICS = tuple(
-    topic.strip()
-    for topic in (KAFKA_TOPICS.split(",") if KAFKA_TOPICS else [KAFKA_TOPIC])
-    if topic.strip()
-)
-analyzer = SentimentIntensityAnalyzer()
-SOURCE_BADGES = {
-    "Google Play": "🟢 Google Play",
-    "Reddit": "🔴 Reddit",
-}
-
-st.set_page_config(page_title="Sentiment Dashboard", layout="wide")
-st.title("Real-time Sentiment Analysis Dashboard")
-st.caption("Monitor live streaming data from Kafka or explore your own datasets with interactive visualizations.")
-
-# -----------------------
-# Sidebar Navigation
-"""
-Real-time Sentiment Analysis Dashboard for Dynamic Topics
-Fetches data from Reddit & Google Play, sends to Kafka, analyzes with VADER
-"""
-
-import json
-import os
-import threading
 """
 Real-time Sentiment Analysis Dashboard for Dynamic Topics
 Fetches data from Reddit & Google Play, sends to Kafka, analyzes with VADER
@@ -67,7 +17,18 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 from dotenv import load_dotenv
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+import sys
+
+# Diagnostic: show which Python executable is running this Streamlit process
+print("STREAMLIT PYTHON:", sys.executable)
+
+# Guarded import for VADER so logs show helpful info if it fails
+try:
+    from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+except Exception as e:
+    # Print diagnostic to the Streamlit logs and re-raise so the traceback is visible
+    print("Failed to import vaderSentiment:", e, "(python:", sys.executable, ")")
+    raise
 
 # Load environment variables
 load_dotenv(override=True)
@@ -80,9 +41,21 @@ except ImportError:
     KafkaProducer = None
 
 # Import custom extractors
-import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'extract'))
 from extractors import extract_reddit_reviews, extract_google_play_reviews
+
+# Import PostgreSQL helpers for summaries & history
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'load'))
+try:
+    from postgres_utils import (
+        store_topic_snapshot,
+        fetch_topic_summaries,
+        fetch_topic_top_reviews,
+    )
+    POSTGRES_AVAILABLE = True
+except Exception:
+    # Dashboard should still work without PostgreSQL
+    POSTGRES_AVAILABLE = False
 
 # -----------------------
 # Configuration
@@ -134,6 +107,9 @@ def initialize_session_state():
     
     if "consumer" not in st.session_state:
         st.session_state.consumer = None
+    
+    if "auto_refresh" not in st.session_state:
+        st.session_state.auto_refresh = True
 
 
 initialize_session_state()
@@ -320,6 +296,18 @@ def process_kafka_messages(consumer) -> int:
         st.session_state.data_cache.append(msg)
     
     st.session_state.last_update_time = datetime.now()
+
+    # Optionally persist a snapshot of the current topic to PostgreSQL
+    # so that historical summaries and top reviews can be plotted later.
+    if POSTGRES_AVAILABLE and messages and st.session_state.topic:
+        try:
+            # Use the full cache so the snapshot reflects all data seen
+            # so far for this topic.
+            store_topic_snapshot(st.session_state.topic, st.session_state.data_cache)
+        except Exception:
+            # Swallow DB errors to avoid breaking the live dashboard.
+            pass
+
     return len(messages)
 
 
@@ -387,7 +375,7 @@ def get_source_distribution() -> Dict[str, int]:
 # Sidebar Controls
 with st.sidebar:
     st.header("⚙️ Controls")
-    
+
     # Topic input
     topic_input = st.text_input(
         "Enter Topic/Product Name:",
@@ -405,6 +393,7 @@ with st.sidebar:
     
     # Streaming controls
     st.subheader("📡 Streaming")
+    consume_only = st.checkbox("Consume only (don't fetch new data)", value=False)
     
     col1, col2 = st.columns(2)
     
@@ -434,6 +423,15 @@ with st.sidebar:
         value=5,
         step=1
     )
+    auto_c1, auto_c2 = st.columns(2)
+    with auto_c1:
+        if st.button("⏹️ Stop Auto-Refresh", use_container_width=True, disabled=not st.session_state.auto_refresh):
+            st.session_state.auto_refresh = False
+            st.rerun()
+    with auto_c2:
+        if st.button("▶️ Resume Auto-Refresh", use_container_width=True, disabled=st.session_state.auto_refresh):
+            st.session_state.auto_refresh = True
+            st.rerun()
     
     st.divider()
     
@@ -481,17 +479,20 @@ else:
             with status_placeholder.container():
                 st.info(f"🔍 Searching for: **{st.session_state.topic}**")
             
-            # Fetch from sources
-            reddit_sent, reddit_err = extract_reddit_data(st.session_state.topic, producer)
-            google_sent, google_err = extract_google_play_data(st.session_state.topic, producer)
+            # Optionally fetch from sources and send to Kafka
+            reddit_sent = reddit_err = google_sent = google_err = 0
+            if not consume_only:
+                reddit_sent, reddit_err = extract_reddit_data(st.session_state.topic, producer)
+                google_sent, google_err = extract_google_play_data(st.session_state.topic, producer)
             
             status_placeholder.empty()
             
-            if reddit_sent > 0 or google_sent > 0:
+            if not consume_only and (reddit_sent > 0 or google_sent > 0):
                 st.toast(f"✅ Extracted {reddit_sent + google_sent} items from sources")
             
             # Consume and process
             processed = process_kafka_messages(consumer)
+            st.caption(f"Kafka polled and processed: {processed} new messages")
     
     # Display results
     if len(st.session_state.data_cache) == 0:
@@ -528,7 +529,13 @@ else:
         st.divider()
         st.subheader("📊 Visualizations")
         
-        viz_tabs = st.tabs(["Sentiment Pie", "Sentiment Trend", "Source Distribution", "Top Reviews"])
+        viz_tabs = st.tabs([
+            "Sentiment Pie",
+            "Sentiment Trend",
+            "Source Distribution",
+            "Top Reviews (Live)",
+            "History (DB)",
+        ])
         
         with viz_tabs[0]:
             # Sentiment pie chart
@@ -585,7 +592,7 @@ else:
                 st.plotly_chart(fig, use_container_width=True)
         
         with viz_tabs[3]:
-            # Top reviews
+            # Top reviews (current in-memory cache)
             review_cols = st.columns(2)
             
             with review_cols[0]:
@@ -613,6 +620,126 @@ else:
                             st.caption(f"Score: {row['score']}")
                 else:
                     st.info("No negative reviews yet.")
+
+        with viz_tabs[4]:
+            # Historical summaries and reviews from PostgreSQL
+            st.markdown("### 🕒 Historical Sentiment (PostgreSQL)")
+
+            if not POSTGRES_AVAILABLE:
+                st.info("PostgreSQL integration is not available. Install `psycopg2-binary` and configure PG env vars to enable history.")
+            else:
+                topic = st.session_state.topic
+                if not topic:
+                    st.info("Enter a topic and start streaming to build history.")
+                else:
+                    # Fetch recent summaries
+                    summaries = fetch_topic_summaries(topic, limit=50)
+                    if summaries:
+                        hist_df = pd.DataFrame(
+                            summaries,
+                            columns=[
+                                "id",
+                                "topic",
+                                "summary_ts",
+                                "total_posts",
+                                "positive_count",
+                                "neutral_count",
+                                "negative_count",
+                                "avg_compound_score",
+                            ],
+                        )
+
+                        hist_df["summary_ts"] = pd.to_datetime(hist_df["summary_ts"], errors="coerce")
+                        hist_df = hist_df.sort_values("summary_ts")
+
+                        col_hist1, col_hist2 = st.columns([2, 1])
+
+                        with col_hist1:
+                            st.markdown("#### Trend over time")
+                            fig_hist = px.line(
+                                hist_df,
+                                x="summary_ts",
+                                y="avg_compound_score",
+                                markers=True,
+                                title=f"Average sentiment over time for '{topic}'",
+                            )
+                            fig_hist.update_layout(hovermode="x unified")
+                            st.plotly_chart(fig_hist, use_container_width=True)
+
+                        with col_hist2:
+                            st.markdown("#### Latest snapshot")
+                            latest = hist_df.iloc[[-1]][[
+                                "summary_ts",
+                                "total_posts",
+                                "positive_count",
+                                "neutral_count",
+                                "negative_count",
+                                "avg_compound_score",
+                            ]]
+                            st.dataframe(latest, use_container_width=True)
+
+                        st.markdown("#### Stored top reviews")
+                        hist_cols = st.columns(2)
+
+                        with hist_cols[0]:
+                            st.markdown("**Top positive (historical)**")
+                            pos_rows = fetch_topic_top_reviews(topic, "Positive", limit=5)
+                            if pos_rows:
+                                pos_df = pd.DataFrame(
+                                    pos_rows,
+                                    columns=[
+                                        "summary_id",
+                                        "topic",
+                                        "summary_ts",
+                                        "sentiment",
+                                        "review_text",
+                                        "source",
+                                        "original_score",
+                                        "compound_score",
+                                        "review_rank",
+                                        "external_id",
+                                    ],
+                                )
+                                for _, row in pos_df.iterrows():
+                                    with st.container(border=True):
+                                        st.caption(str(row["summary_ts"]))
+                                        st.markdown(f"**Source:** {row['source'] or 'Unknown'}")
+                                        text = str(row["review_text"])
+                                        st.write(text[:200] + "..." if len(text) > 200 else text)
+                                        st.caption(f"Score: {row['original_score']}, Compound: {row['compound_score']}")
+                            else:
+                                st.info("No historical positive reviews stored yet.")
+
+                        with hist_cols[1]:
+                            st.markdown("**Top negative (historical)**")
+                            neg_rows = fetch_topic_top_reviews(topic, "Negative", limit=5)
+                            if neg_rows:
+                                neg_df = pd.DataFrame(
+                                    neg_rows,
+                                    columns=[
+                                        "summary_id",
+                                        "topic",
+                                        "summary_ts",
+                                        "sentiment",
+                                        "review_text",
+                                        "source",
+                                        "original_score",
+                                        "compound_score",
+                                        "review_rank",
+                                        "external_id",
+                                    ],
+                                )
+                                for _, row in neg_df.iterrows():
+                                    with st.container(border=True):
+                                        st.caption(str(row["summary_ts"]))
+                                        st.markdown(f"**Source:** {row['source'] or 'Unknown'}")
+                                        text = str(row["review_text"])
+                                        st.write(text[:200] + "..." if len(text) > 200 else text)
+                                        st.caption(f"Score: {row['original_score']}, Compound: {row['compound_score']}")
+                            else:
+                                st.info("No historical negative reviews stored yet.")
+                    else:
+                        st.info("No historical snapshots stored yet for this topic. Keep the stream running to accumulate history.")
         
         # Raw data table
         st.divider()
@@ -631,6 +758,10 @@ else:
 
 
 # Auto-refresh
-if st.session_state.streaming_active and len(st.session_state.data_cache) > 0:
+if (
+    st.session_state.streaming_active
+    and st.session_state.auto_refresh
+    and len(st.session_state.data_cache) > 0
+):
     time.sleep(refresh_interval)
     st.rerun()
