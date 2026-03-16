@@ -16,28 +16,24 @@ except Exception:
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'extract'))
-from extractors import extract_both_sources, search_google_play_app
+from extractors import extract_reddit_reviews
 
 
 st.set_page_config(page_title="Topic Sentiment Search", layout="wide")
 st.title("🔎 Topic Sentiment Search")
-st.markdown("Enter a topic (product, tool, company, etc.), then click Search to fetch recent Reddit posts and Google Play reviews and analyze sentiment in real time.")
+st.markdown("Enter a topic (product, tool, company, etc.), then click Search to fetch recent Reddit posts and analyze sentiment in real time.")
 
 analyzer = SentimentIntensityAnalyzer()
 
 
 @st.cache_data(ttl=300)
-def fetch_data_for_topic(topic: str, reddit_limit: int = 50, google_count: int = 100) -> Tuple[List[Dict], List[Dict]]:
-    """Fetch data from both Reddit and Google Play via the shared extractors.
-
-    Returns a tuple (reddit_posts, google_reviews).
-    """
+def fetch_data_for_topic(topic: str, reddit_limit: int = 50) -> List[Dict]:
+    """Fetch data from Reddit for the given topic via the shared extractor."""
     try:
-        reddit_posts, google_reviews = extract_both_sources(topic, reddit_limit, google_count)
-        return reddit_posts, google_reviews
+        return extract_reddit_reviews(topic, limit=reddit_limit)
     except Exception as e:
-        st.error(f"Error fetching data: {e}")
-        return [], []
+        st.error(f"Error fetching Reddit data: {e}")
+        return []
 
 
 def analyze_texts(items: List[Dict], source_name: str) -> pd.DataFrame:
@@ -85,9 +81,7 @@ def build_wordcloud(texts: List[str]):
 with st.sidebar:
     st.header('Search Controls')
     topic = st.text_input('Topic or product name', value='', placeholder='e.g., Samsung S25, ChatGPT, Tesla Model 3')
-    source_pref = st.selectbox('Prefer source', options=['Both', 'Reddit', 'Google Play'], index=0)
     reddit_limit = st.slider('Max Reddit posts', min_value=10, max_value=200, value=50, step=10)
-    google_count = st.slider('Max Google Play reviews', min_value=10, max_value=200, value=100, step=10)
     search_button = st.button('Search')
 
 if not topic:
@@ -95,25 +89,13 @@ if not topic:
 else:
     # When Search clicked, fetch and analyze
     if search_button:
-        with st.spinner('Fetching recent posts and reviews...'):
-            reddit_posts, google_reviews = fetch_data_for_topic(topic, reddit_limit=reddit_limit, google_count=google_count)
-            # Also resolve app id (for transparency)
-            resolved_app_id = search_google_play_app(topic)
+        with st.spinner('Fetching recent Reddit posts...'):
+            reddit_posts = fetch_data_for_topic(topic, reddit_limit=reddit_limit)
 
-        # Choose according to preference
-        df_parts = []
-        if source_pref in ('Both', 'Reddit') and reddit_posts:
-            df_reddit = analyze_texts(reddit_posts, 'Reddit')
-            df_parts.append(df_reddit)
-
-        if source_pref in ('Both', 'Google Play') and google_reviews:
-            df_google = analyze_texts(google_reviews, 'Google Play')
-            df_parts.append(df_google)
-
-        if not df_parts:
-            st.warning('No data found for this topic from the selected sources.')
+        if not reddit_posts:
+            st.warning('No Reddit data found for this topic.')
         else:
-            df = pd.concat(df_parts, ignore_index=True)
+            df = analyze_texts(reddit_posts, 'Reddit')
 
             # Summary metrics
             st.subheader(f"Results for: {topic}")
@@ -126,11 +108,7 @@ else:
             col1.metric('Total items', total)
             col2.metric('Positive', f"{positives} ({positives/total*100:.1f}%)" if total>0 else '0')
             col3.metric('Negative', f"{negatives} ({negatives/total*100:.1f}%)" if total>0 else '0')
-            # Show GP review count if any
-            gp_count = len(google_reviews) if google_reviews else 0
-            col4.metric('Google Play reviews', gp_count)
-            if gp_count and resolved_app_id:
-                st.caption(f"Google Play app resolved: {resolved_app_id}")
+            col4.metric('Source', 'Reddit')
 
             # Visuals: bar and pie
             st.markdown('### Sentiment Distribution')

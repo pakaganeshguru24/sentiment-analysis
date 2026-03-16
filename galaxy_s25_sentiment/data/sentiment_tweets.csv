@@ -1,6 +1,0 @@
-tweet,cleaned_tweet,sentiment,date
-"I love my new Galaxy S25! Battery lasts forever.","love new galaxy s25 battery lasts forever",positive,2025-09-15
-"The camera is disappointing compared to last year.","camera disappointing compared last year",negative,2025-09-15
-"Decent phone, but too expensive.","decent phone too expensive",neutral,2025-09-15
-"Screen is amazing, super bright and clear!","screen amazing super bright clear",positive,2025-09-16
-"Had issues with overheating after a week.","issues overheating after week",negative,2025-09-16

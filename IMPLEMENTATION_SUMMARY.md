@@ -2,15 +2,14 @@
 
 ## ✅ What Was Built
 
-A complete **real-time sentiment analysis system** with a Streamlit dashboard that enables users to analyze sentiment for any product/topic dynamically with live data from Reddit and Google Play.
+A complete **real-time sentiment analysis system** with a Streamlit dashboard that enables users to analyze sentiment for any product/topic dynamically with live data from Reddit.
 
 ## 🎯 Requirements Met
 
 ### ✅ Core Functionality
 - [x] **Dynamic Topic Input** - Users enter any product/topic name (no hardcoding)
-- [x] **Multi-Source Extraction**
+- [x] **Reddit Extraction**
   - Reddit posts (using PRAW)
-  - Google Play reviews (using google-play-scraper)
 - [x] **Kafka Integration** - Data flows: Extract → Kafka → Dashboard
 - [x] **Real-time Sentiment Analysis** - VADER sentiment analyzer
 - [x] **Interactive Visualizations** - Plotly charts for:
@@ -20,7 +19,7 @@ A complete **real-time sentiment analysis system** with a Streamlit dashboard th
   - Top 5 positive/negative reviews
 
 ### ✅ Extra Features
-- [x] **Source Tags** - Shows "Reddit" or "Google Play" for each item
+- [x] **Source Tags** - Shows "Reddit" for each item
 - [x] **In-Memory Storage** - 500-item cache with FIFO eviction
 - [x] **Pause/Resume Streaming** - Toggle data collection on/off
 - [x] **User-Controlled Refresh** - Manual refresh button + interval slider
@@ -39,10 +38,8 @@ A complete **real-time sentiment analysis system** with a Streamlit dashboard th
 
 #### 2. **Extraction Utilities**
 - `galaxy_s25_sentiment/extract/extractors.py` (110 lines)
-  - Unified interface for Reddit and Google Play extraction
+  - Interface for Reddit extraction
   - `extract_reddit_reviews()` - Fetch Reddit posts
-  - `extract_google_play_reviews()` - Fetch Google Play reviews
-  - `search_google_play_app()` - App ID lookup
   - Error handling and graceful degradation
 
 - `galaxy_s25_sentiment/extract/kafka_utils.py` (100 lines)
@@ -65,7 +62,7 @@ A complete **real-time sentiment analysis system** with a Streamlit dashboard th
 
 - `demo_sentiment_analysis.py` (350 lines)
   - Interactive demo showing programmatic usage
-  - 4 demo modes: basic, Reddit, Google Play, statistics
+  - Demo modes: basic, Reddit, statistics
   - Shows how to use components outside Streamlit
   - Run with: `python demo_sentiment_analysis.py`
 
@@ -109,10 +106,10 @@ A complete **real-time sentiment analysis system** with a Streamlit dashboard th
          ▼
 ┌──────────────────────────────────┐
 │ Data Extraction                  │
-├──────────────┬───────────────────┤
-│ Reddit PRAW  │ Google Play       │
-│ • search()   │ • scraper         │
-│ • collect    │ • reviews()       │
+├──────────────┐                   │
+│ Reddit PRAW  │                   │
+│ • search()   │                   │
+│ • collect    │                   │
 └──────────────┴────────┬──────────┘
                         │
                         ▼
@@ -146,9 +143,8 @@ A complete **real-time sentiment analysis system** with a Streamlit dashboard th
 ```
 Dashboard (realtime_dashboard.py)
 ├─ Streamlit UI (sidebar + main)
-├─ extractors.py (fetch data)
-│  ├─ reddit_extract.py (PRAW)
-│  └─ google_extract.py (Scraper)
+├─ extractors.py (fetch Reddit data)
+│  └─ reddit_extract.py (PRAW)
 ├─ Kafka (KafkaProducer)
 ├─ Kafka (KafkaConsumer)
 ├─ VADER (SentimentIntensityAnalyzer)
@@ -202,7 +198,7 @@ python demo_sentiment_analysis.py
 ### Visualization Components
 1. **Sentiment Pie Chart** - Distribution overview
 2. **Sentiment Trend** - Time-series changes
-3. **Source Distribution** - Reddit vs Google Play
+3. **Source Distribution** - Reddit-only
 4. **Top Reviews** - Best positive/negative items
 5. **Raw Data Table** - Last 20 items in detail
 
@@ -222,13 +218,10 @@ python demo_sentiment_analysis.py
 KAFKA_BOOTSTRAP=localhost:9092
 KAFKA_TOPIC=sentiment-stream
 
-# Reddit (optional, for Reddit extraction)
+# Reddit (for Reddit extraction)
 REDDIT_CLIENT_ID=...
 REDDIT_CLIENT_SECRET=...
 REDDIT_USER_AGENT=...
-
-# Google Play (optional)
-GOOGLE_APP_ID=com.samsung.android.voc
 ```
 
 ### Code Configuration (realtime_dashboard.py)
@@ -241,7 +234,6 @@ MAX_FETCH_PER_REFRESH = 100  # Max to fetch per update
 
 ### Response Times
 - **Reddit Extraction**: 5-15 seconds (50 posts)
-- **Google Play**: 5-10 seconds (100 reviews)
 - **VADER Analysis**: <100ms per item
 - **Dashboard Refresh**: 1-2 seconds
 - **Kafka Send**: <50ms per message

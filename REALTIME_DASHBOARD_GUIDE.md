@@ -4,7 +4,7 @@
 
 This real-time sentiment analysis dashboard allows you to:
 - ✅ Enter any product/topic name dynamically
-- ✅ Fetch live data from Reddit and Google Play
+- ✅ Fetch live data from Reddit
 - ✅ Analyze sentiment using VADER (optimized for social media)
 - ✅ Send data through Kafka for streaming
 - ✅ Display interactive visualizations with Plotly
@@ -88,16 +88,15 @@ The dashboard will open at `http://localhost:8501`
 ### Step 2: Start Streaming
 1. Click **"▶️ Start Streaming"** button
 2. The app will:
-   - Fetch Reddit posts matching your query
-   - Fetch Google Play reviews (if app exists)
-   - Send data to Kafka
-   - Consume and analyze with VADER sentiment
+     - Fetch Reddit posts matching your query
+     - Send data to Kafka
+     - Consume and analyze with VADER sentiment
 
 ### Step 3: Monitor Metrics
 The dashboard displays:
-- **Total Items**: Number of reviews/posts analyzed
+- **Total Items**: Number of posts analyzed
 - **Sentiment Breakdown**: % of Positive, Neutral, Negative
-- **Source Distribution**: Reddit vs Google Play split
+- **Source Distribution**: Reddit-only (by source field)
 
 ### Step 4: Explore Visualizations
 
@@ -110,9 +109,8 @@ The dashboard displays:
 - Useful for spotting trends
 
 #### 🔄 Source Distribution
-- How many items from each source
+- How many items from each source (Reddit-only)
 - Reddit: #ff4500
-- Google Play: #4285f4
 
 #### 🏆 Top Reviews
 - **Top Positive Reviews**: Highest scored positive comments
@@ -134,15 +132,14 @@ The dashboard displays:
 │     Streamlit Dashboard (realtime_dashboard.py) │
 └────────────┬────────────────────────────────────┘
              │
-             ├─────────────────────────┬──────────────────────────┐
-             │                         │                          │
-        ┌────▼────┐            ┌──────▼──────┐         ┌─────────▼────┐
-        │ Reddit  │            │ Google Play │         │  Sentiment   │
-        │ Extract │            │   Extract   │         │  Analysis    │
-        │ (PRAW)  │            │ (g-play-scr)│         │   (VADER)    │
-        └────┬────┘            └──────┬──────┘         └──────┬──────┘
+             ├─────────────────────────┐                        │
+             │                         │                        │
+        ┌────▼────┐                    │              ┌─────────▼────┐
+        │ Reddit  │                    │              │  Sentiment   │
+        │ Extract │                    │              │  Analysis    │
+        │ (PRAW)  │                    │              │   (VADER)    │
+        └────┬────┘                    │              └──────┬──────┘
              │                         │                       │
-             └─────────────────┬───────┘                       │
                                │                               │
                           ┌────▼──────────────────────────────▼───┐
                           │        Kafka Topic (JSON)              │

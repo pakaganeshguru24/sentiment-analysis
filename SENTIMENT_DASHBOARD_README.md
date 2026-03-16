@@ -2,12 +2,12 @@
 
 ## 📊 Overview
 
-A **complete real-time sentiment analysis system** that allows you to analyze sentiment for any product or topic by fetching live data from Reddit and Google Play, streaming through Kafka, and visualizing with interactive Plotly charts.
+A **complete real-time sentiment analysis system** that allows you to analyze sentiment for any product or topic by fetching live data from Reddit, streaming through Kafka, and visualizing with interactive Plotly charts.
 
 ### Key Features
 ✨ **Dynamic Topic Input** - Search any product/topic without hardcoding
 🔄 **Real-time Streaming** - Live data via Kafka
-🌍 **Multi-Source** - Reddit posts + Google Play reviews
+🌍 **Source** - Reddit posts
 🧠 **Smart Analysis** - VADER sentiment analyzer (optimized for social media)
 📈 **Beautiful Visualizations** - Interactive Plotly charts
 ⏸️ **Pause/Resume** - Control data streaming on demand
@@ -86,10 +86,9 @@ d:\Sentiment-Analysis\
 │   │   └── realtime_dashboard.py     # ✨ NEW - Real-time dashboard
 │   ├── extract/
 │   │   ├── reddit_extract.py         # Reddit API
-│   │   ├── google_extract.py         # Google Play scraper
-│   │   ├── extractors.py             # ✨ NEW - Unified interface
+│   │   ├── extractors.py             # ✨ NEW - Reddit interface
 │   │   ├── kafka_utils.py            # ✨ NEW - Kafka helpers
-│   │   └── multi_source_extract.py   # Multi-source producer
+│   │   └── multi_source_extract.py   # Reddit Kafka producer
 │   ├── sentiment/
 │   │   └── sentiment_analysis.py     # VADER analyzer
 │   └── requirements.txt              # ✨ UPDATED - Dependencies
@@ -118,7 +117,7 @@ d:\Sentiment-Analysis\
 ```
 1️⃣  Sentiment Pie    → Overall sentiment distribution
 2️⃣  Sentiment Trend  → How sentiment changes over time
-3️⃣  Source Dist      → Reddit vs Google Play comparison
+3️⃣  Source Dist      → Reddit-only comparison
 4️⃣  Top Reviews      → Best positive/negative comments
 ```
 
@@ -178,9 +177,8 @@ streamlit run galaxy_s25_sentiment/dashboard/realtime_dashboard.py
 ```
 User Input: "<your-topic>"
            ↓
-    Extract Data
-    ├─ Reddit (PRAW)
-    └─ Google Play (Scraper)
+       Extract Data
+       └─ Reddit (PRAW)
            ↓
     Send to Kafka
     ├─ JSON messages
@@ -251,7 +249,7 @@ MAX_FETCH_PER_REFRESH = 100  # Max to fetch per update
 |---------|----------|
 | "Kafka connection failed" | Run: `docker-compose up -d` |
 | "No Reddit data" | Check .env credentials at reddit.com/prefs/apps |
-| "No Google Play reviews" | Try different topic (e.g., "Samsung") |
+| "No Reddit posts found" | Try different topic (e.g., "Samsung") |
 | "Dashboard won't load" | Check Streamlit: `streamlit --version` |
 | "ModuleNotFoundError" | Run: `pip install -r galaxy_s25_sentiment/requirements.txt` |
 
@@ -269,7 +267,6 @@ More solutions in: **PRE_LAUNCH_CHECKLIST.md**
 | Metric | Value |
 |--------|-------|
 | Reddit Extraction | 5-15 seconds |
-| Google Play Extraction | 5-10 seconds |
 | VADER Analysis | <100ms per item |
 | Dashboard Refresh | 1-2 seconds |
 | Memory Usage | 200-300 MB |
@@ -282,33 +279,29 @@ More solutions in: **PRE_LAUNCH_CHECKLIST.md**
 | Visualization | Plotly | Interactive charts |
 | Data Processing | Pandas/NumPy | Data manipulation |
 | Sentiment | VADER | Sentiment analysis |
-| Reddit | PRAW | Post collection |
-| Google Play | google-play-scraper | Review scraping |
+| Reddit | PRAW | Reddit API client |
 | Streaming | Kafka | Real-time pipeline |
 | Language | Python 3.13 | All code |
 
 ## 🔄 Data Pipeline
 
 ```
-┌──────────────┐
-│ Reddit (PRAW)│         ┌────────────┐
-└──────┬───────┘         │   Kafka    │      ┌──────────┐
-       │                 │sentiment-  │      │Streamlit │
-┌──────▼────────────┐    │  stream    │      │Dashboard │
-│Google Play Scraper├───▶│            │◀─────┤          │
-└──────────────────┘    └────────────┘      └──────────┘
-                              ▲
-                              │
-                       ┌──────┴──────┐
-                       │VADER Analyzer│
-                       │Memory Cache  │
-                       └──────────────┘
+┌──────────────┐         ┌────────────┐      ┌──────────┐
+│ Reddit (PRAW)├────────▶│   Kafka    │◀────▶│Streamlit │
+└──────────────┘         │sentiment-  │      │Dashboard │
+                         │  stream    │      └──────────┘
+                         ▲
+                         │
+                  ┌──────┴──────┐
+                  │VADER Analyzer│
+                  │Memory Cache  │
+                  └──────────────┘
 ```
 
 ## ✨ What Makes This Special
 
 ✅ **Fully Dynamic** - No hardcoded values
-✅ **Multi-Source** - Reddit + Google Play integrated
+✅ **Reddit Source** - Reddit integrated
 ✅ **Real-Time** - Kafka-powered streaming
 ✅ **User-Friendly** - Pause/resume, manual refresh
 ✅ **Well-Documented** - 5 comprehensive guides

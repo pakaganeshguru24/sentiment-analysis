@@ -3,7 +3,7 @@
 ## What You Built
 
 - A **real-time sentiment analysis dashboard** that:
-- 🔍 Fetches live data from Reddit (via PRAW) and Google Play (via google-play-scraper)
+- 🔍 Fetches live data from Reddit (via PRAW)
  - 📥 Accepts dynamic product/topic names (e.g., "example-topic", "iPhone 17")
 - 📤 Sends all data through Kafka streaming (topic: `sentiment-stream`)
 - 🧠 Analyzes sentiment with VADER (optimized for social media text)
@@ -72,7 +72,7 @@ Browser opens at `http://localhost:8501`
 ### Main Display (4 Tabs)
 1. **Sentiment Pie** - Overall distribution
 2. **Sentiment Trend** - Changes over time
-3. **Source Distribution** - Reddit vs Google Play
+3. **Source Distribution** - Reddit-only (by source field)
 4. **Top Reviews** - Best positive/negative comments
 
 ### Metrics Row
@@ -130,9 +130,8 @@ No hardcoded values - Enter ANY product name:
 - "MacBook Pro"
 - "PlayStation 5"
 
-### Multi-Source Data
+### Data Source
 - **Reddit** (via PRAW) - Community discussions
-- **Google Play** (via google-play-scraper) - App reviews
 
 Each source tagged in results:
 ```
@@ -153,10 +152,10 @@ Uses **VADER** (Valence Aware Dictionary and sEntiment Reasoner):
 ### Kafka Streaming
 ```
 Extract → Kafka Topic → Dashboard
-  ↓                          ↓
-Reddit/              Consumer polls
-Google Play          every 5s
-  ↓                    ↓
+   ↓                          ↓
+Reddit               Consumer polls
+                               every 5s
+   ↓                    ↓
 Send JSON      Analyze + Cache
 ```
 
@@ -212,8 +211,7 @@ Or refresh: Click "🔄 Refresh Once"
 ```
 Possible causes:
 - No Reddit posts for that topic
-- Topic not on Google Play
-- App name misspelled
+- Topic name too specific or misspelled
 Solution: Try "Galaxy", "iPhone", "Tesla" (simpler terms)
 ```
 
@@ -223,7 +221,7 @@ Solution: Try "Galaxy", "iPhone", "Tesla" (simpler terms)
 ```
 ⏳ Loading...
 Enter topic → Click "Start Streaming"
-🔄 Fetching from Reddit & Google Play...
+🔄 Fetching from Reddit...
 ```
 
 ### After 10-15 seconds
@@ -275,8 +273,7 @@ Compound ≤ -0.05   → 😞 Negative
    - Identify turning points
 
 4. **Check Source Distribution**
-   - More Reddit data = community opinions
-   - More Google Play = app users
+   - Reddit data = community opinions
 
 5. **Top Reviews are Most Helpful**
    - Positive: What users love
@@ -292,10 +289,9 @@ User enters: "example-topic"
   └──────┬───────┘
          ↓
     ┌────────────────────────────┐
-    │  Fetch Data (async)        │
-    ├────────────────────────────┤
-    │ • Reddit (PRAW)            │
-    │ • Google Play (Scraper)    │
+   │  Fetch Data (async)        │
+   ├────────────────────────────┤
+   │ • Reddit (PRAW)            │
     └─────────┬──────────────────┘
               ↓
     ┌────────────────────────┐

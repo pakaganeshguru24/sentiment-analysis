@@ -30,7 +30,6 @@ CONSUMER_TOPICS = tuple(
 )
 analyzer = SentimentIntensityAnalyzer()
 SOURCE_BADGES = {
-    "Google Play": "🟢 Google Play",
     "Reddit": "🔴 Reddit",
 }
 
@@ -41,16 +40,16 @@ st.caption("Monitor live streaming data from Kafka or explore your own datasets 
 # -----------------------
 # Sidebar Navigation
 """
-Real-time Sentiment Analysis Dashboard for Dynamic Topics
-Fetches data from Reddit & Google Play, sends to Kafka, analyzes with VADER
+Real-time Sentiment Analysis Dashboard for Dynamic Topics.
+Fetches data from Reddit, sends to Kafka, analyzes with VADER.
 """
 
 import json
 import os
 import threading
 """
-Real-time Sentiment Analysis Dashboard for Dynamic Topics
-Fetches data from Reddit & Google Play, sends to Kafka, analyzes with VADER
+Real-time Sentiment Analysis Dashboard for Dynamic Topics.
+Fetches data from Reddit, sends to Kafka, analyzes with VADER.
 """
 
 import json
@@ -79,10 +78,10 @@ except ImportError:
     KafkaConsumer = None
     KafkaProducer = None
 
-# Import custom extractors
+# Import custom extractors (Reddit-only)
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'extract'))
-from extractors import extract_reddit_reviews, extract_google_play_reviews
+from extractors import extract_reddit_reviews
 
 # -----------------------
 # Configuration
@@ -266,41 +265,11 @@ def extract_reddit_data(topic: str, producer) -> Tuple[int, int]:
     return sent_count, error_count
 
 
-def extract_google_play_data(app_query: str, producer) -> Tuple[int, int]:
-    """Extract Google Play reviews and send to Kafka."""
-    sent_count = 0
-    error_count = 0
-    
-    try:
-        reviews_list = extract_google_play_reviews(app_query, count=100)
-        
-        for review in reviews_list:
-            data = {
-                "id": review.get("reviewId", ""),
-                "title": "",
-                "text": review.get("content", ""),
-                "score": review.get("score", 0),
-                "timestamp": str(review.get("at", "")) if review.get("at") else "",
-                "source": "Google Play",
-            }
-            
-            if send_to_kafka(producer, data):
-                sent_count += 1
-            else:
-                error_count += 1
-    except Exception as e:
-        st.warning(f"Error extracting Google Play data: {e}")
-        error_count += 1
-    
-    return sent_count, error_count
-
-
 def data_extraction_loop(topic: str, producer, stop_event):
-    """Continuously extract data from both sources."""
+    """Continuously extract data from Reddit."""
     while not stop_event.is_set():
         try:
             reddit_sent, reddit_err = extract_reddit_data(topic, producer)
-            google_sent, google_err = extract_google_play_data(topic, producer)
             
             # Wait before next extraction
             time.sleep(10)
@@ -453,13 +422,12 @@ with st.sidebar:
     **How it works:**
     1. Enter a topic name
     2. Click "Start Streaming"
-    3. Data fetched from Reddit & Google Play
+    3. Data fetched from Reddit
     4. Sentiment analyzed with VADER
     5. Results displayed in real-time
     
-    **Sources:**
+    **Source:**
     - 🔴 Reddit posts
-    - 🟦 Google Play reviews
     """)
 
 
@@ -481,14 +449,13 @@ else:
             with status_placeholder.container():
                 st.info(f"🔍 Searching for: **{st.session_state.topic}**")
             
-            # Fetch from sources
+            # Fetch from Reddit only
             reddit_sent, reddit_err = extract_reddit_data(st.session_state.topic, producer)
-            google_sent, google_err = extract_google_play_data(st.session_state.topic, producer)
             
             status_placeholder.empty()
             
-            if reddit_sent > 0 or google_sent > 0:
-                st.toast(f"✅ Extracted {reddit_sent + google_sent} items from sources")
+            if reddit_sent > 0:
+                st.toast(f"✅ Extracted {reddit_sent} items from Reddit")
             
             # Consume and process
             processed = process_kafka_messages(consumer)
@@ -569,7 +536,7 @@ else:
                 st.info("Not enough data for trend visualization yet.")
         
         with viz_tabs[2]:
-            # Source distribution
+            # Source distribution (Reddit-only)
             if source_dist:
                 fig = px.bar(
                     x=list(source_dist.keys()),
@@ -579,7 +546,6 @@ else:
                     color=list(source_dist.keys()),
                     color_discrete_map={
                         "Reddit": "#ff4500",
-                        "Google Play": "#4285f4"
                     }
                 )
                 st.plotly_chart(fig, use_container_width=True)
