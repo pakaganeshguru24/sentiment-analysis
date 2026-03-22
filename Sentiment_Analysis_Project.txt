@@ -1,0 +1,3033 @@
+Heading
+=======
+
+Sentiment Analysis Project
+
+Structure
+=========
+
+d:\Sentiment-Analysis\
+├── .git\
+├── .vscode\
+├── .zencoder\
+├── .zenflow\
+├── data\
+│   ├── cleaned_all.csv
+│   ├── google_reviews_s25_ultra.csv
+│   ├── google_reviews.csv
+│   ├── reddit_posts.csv
+│   └── sentiment_all.csv
+├── galaxy_s25_sentiment\
+│   ├── dashboard\
+│   │   ├── app.py
+│   │   ├── kafka_realtime_app.py
+│   │   ├── realtime_dashboard.py
+│   │   └── topic_search_app.py
+│   ├── extract\
+│   │   ├── extractors.py
+│   │   ├── kafka_utils.py
+│   │   └── multi_source_extract.py
+│   ├── load\
+│   │   ├── postgres_utils.py
+│   │   └── save_to_db.py
+│   ├── sentiment\
+│   │   ├── sentiment_analysis.py
+│   │   └── streaming_sentiment.py
+│   └── transform\
+│       └── clean_data.py
+├── .env
+├── .env.example
+├── docker-compose.yml
+├── IMPLEMENTATION_SUMMARY.md
+├── PRE_LAUNCH_CHECKLIST.md
+├── QUICKSTART.md
+├── README.md
+├── REALTIME_DASHBOARD_GUIDE.md
+├── requirements.txt
+├── SENTIMENT_DASHBOARD_README.md
+├── streaming_sentiment.py
+├── test_env.py
+└── venv\
+
+Code Files
+==========
+
+---
+File: d:\Sentiment-Analysis\test_env.py
+---
+
+import praw
+
+reddit = praw.Reddit()
+print("✅ Authenticated as:", reddit.user.me())
+
+---
+File: d:\Sentiment-Analysis\streaming_sentiment.py
+---
+
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, udf
+from pyspark.sql.types import StringType
+from textblob import TextBlob
+
+# -----------------------------
+# Initialize Spark
+# -----------------------------
+spark = SparkSession.builder \
+    .appName("GalaxyS25SentimentStreaming") \
+    .getOrCreate()
+
+spark.sparkContext.setLogLevel("WARN")
+
+# -----------------------------
+# Read Kafka Stream
+# -----------------------------
+kafka_bootstrap = "localhost:9092"
+kafka_topic = "sentiment-stream"
+
+df = spark.readStream \
+    .format("kafka") \
+    .option("kafka.bootstrap.servers", kafka_bootstrap) \
+    .option("subscribe", kafka_topic) \
+    .option("startingOffsets", "latest") \
+    .load()
+
+# Kafka value is in bytes, convert to string
+df_string = df.selectExpr("CAST(value AS STRING) as json_str")
+    import streamlit as st
+    import pandas as pd
+    import plotly.express as px
+    from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+    from typing import List, Dict, Tuple
+    import io
+    import matplotlib.pyplot as plt
+
+    # Try to import WordCloud; if missing, we'll fallback to top-term bar chart
+    try:
+        from wordcloud import WordCloud
+        WORDCLOUD_AVAILABLE = True
+    except Exception:
+        WORDCLOUD_AVAILABLE = False
+
+    import sys
+    import os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'extract'))
+    from extractors import extract_reddit_reviews
+
+
+# -----------------------------
+# Parse JSON
+# -----------------------------
+
+from pyspark.sql.functions import from_json
+
+
+    @st.cache_data(ttl=300)
+    def fetch_data_for_topic(topic: str, reddit_limit: int = 50) -> List[Dict]:
+        """Fetch data from Reddit for the given topic via the shared extractor."""
+        try:
+            return extract_reddit_reviews(topic, limit=reddit_limit)
+        except Exception as e:
+            st.error(f"Error fetching Reddit data: {e}")
+            return []
+
+
+    def analyze_texts(items: List[Dict], source_name: str) -> pd.DataFrame:
+        """Normalize extracted items and run VADER sentiment scoring.
+
+        Expects each item to contain a textual field (content/text/title/selftext).
+        """
+        rows = []
+        for it in items:
+            # heuristics for text
+            text = it.get('content') or it.get('text') or it.get('title') or ''
+            if not text:
+                continue
+            scores = analyzer.polarity_scores(str(text))
+            compound = scores.get('compound', 0.0)
+            if compound >= 0.05:
+                sentiment = 'Positive'
+            elif compound <= -0.05:
+                sentiment = 'Negative'
+            else:
+                sentiment = 'Neutral'
+
+            rows.append({
+                'source': source_name,
+                'text': text,
+                'sentiment': sentiment,
+                'compound_score': compound,
+                'raw': it,
+            })
+
+        return pd.DataFrame(rows)
+
+
+    def build_wordcloud(texts: List[str]):
+        if not WORDCLOUD_AVAILABLE:
+            return None
+        joined = ' '.join(texts)
+        wc = WordCloud(width=800, height=400, background_color='white').generate(joined)
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.imshow(wc, interpolation='bilinear')
+        ax.axis('off')
+        return fig
+
+
+    with st.sidebar:
+        st.header('Search Controls')
+        topic = st.text_input('Topic or product name', value='', placeholder='e.g., Samsung S25, ChatGPT, Tesla Model 3')
+        reddit_limit = st.slider('Max Reddit posts', min_value=10, max_value=200, value=50, step=10)
+        search_button = st.button('Search')
+
+    if not topic:
+        st.info('Enter a topic in the sidebar and click Search to begin.')
+    else:
+        # When Search clicked, fetch and analyze
+        if search_button:
+            with st.spinner('Fetching recent Reddit posts...'):
+                reddit_posts = fetch_data_for_topic(topic, reddit_limit=reddit_limit)
+
+            if not reddit_posts:
+                st.warning('No Reddit data found for this topic.')
+            else:
+                df = analyze_texts(reddit_posts, 'Reddit')
+
+                # Summary metrics
+                st.subheader(f"Results for: {topic}")
+                col1, col2, col3, col4 = st.columns([1,1,1,1])
+                total = len(df)
+                positives = (df['sentiment']=='Positive').sum()
+                neutrals = (df['sentiment']=='Neutral').sum()
+                negatives = (df['sentiment']=='Negative').sum()
+
+                col1.metric('Total items', total)
+                col2.metric('Positive', f"{positives} ({positives/total*100:.1f}%)" if total>0 else '0')
+                col3.metric('Negative', f"{negatives} ({negatives/total*100:.1f}%)" if total>0 else '0')
+                col4.metric('Source', 'Reddit')
+
+                # Visuals: bar and pie
+                st.markdown('### Sentiment Distribution')
+                counts = df['sentiment'].value_counts().reindex(['Positive','Neutral','Negative']).fillna(0).astype(int)
+                fig_bar = px.bar(x=counts.index, y=counts.values, labels={'x':'Sentiment','y':'Count'}, color=counts.index, color_discrete_map={'Positive':'#2ecc71','Neutral':'#95a5a6','Negative':'#e74c3c'})
+                st.plotly_chart(fig_bar, use_container_width=True)
+
+                fig_pie = px.pie(values=counts.values, names=counts.index, title='Sentiment Pie')
+                st.plotly_chart(fig_pie, use_container_width=True)
+
+                # Word cloud or top terms
+                st.markdown('### Word Cloud / Top Terms')
+                sample_texts = df['text'].astype(str).tolist()
+                if WORDCLOUD_AVAILABLE and sample_texts:
+                    wc_fig = build_wordcloud(sample_texts)
+                    if wc_fig is not None:
+                        st.pyplot(wc_fig)
+                else:
+                    # fallback: show top terms
+                    from collections import Counter
+                    import re
+                    tokens = []
+                    for t in sample_texts:
+                        words = re.findall(r"\w{3,}", t.lower())
+                        tokens.extend([w for w in words if not w.isnumeric()])
+                    top = Counter(tokens).most_common(25)
+                    if top:
+                        top_df = pd.DataFrame(top, columns=['term','count'])
+                        fig_terms = px.bar(top_df, x='term', y='count', title='Top terms')
+                        st.plotly_chart(fig_terms, use_container_width=True)
+                    else:
+                        st.info('No frequent terms to show yet.')
+
+                # Top posts/comments table
+                st.markdown('### Top Posts / Comments')
+                # Top positive
+                pos_df = df[df['sentiment']=='Positive'].sort_values('compound_score', ascending=False).head(5)
+                neg_df = df[df['sentiment']=='Negative'].sort_values('compound_score').head(5)
+
+                t1, t2 = st.columns(2)
+                with t1:
+                    st.markdown('#### Top Positive')
+                    if not pos_df.empty:
+                        for _, r in pos_df.iterrows():
+                            st.write(r['text'])
+                            st.caption(f"Source: {r['source']} — Score: {r['compound_score']:.3f}")
+                            st.divider()
+                    else:
+                        st.info('No positive items found')
+
+                with t2:
+                    st.markdown('#### Top Negative')
+                    if not neg_df.empty:
+                        for _, r in neg_df.iterrows():
+                            st.write(r['text'])
+                            st.caption(f"Source: {r['source']} — Score: {r['compound_score']:.3f}")
+                            st.divider()
+                    else:
+                        st.info('No negative items found')
+
+                # Raw table of top N
+                st.markdown('### Recent Items (table)')
+                display_df = df[['source','text','sentiment','compound_score']].copy()
+                display_df['text'] = display_df['text'].str.slice(0,300)
+                st.dataframe(display_df.head(100), use_container_width=True)
+
+                st.success('Analysis complete')
+
+        else:
+            st.info('Press Search to fetch and analyze live data for the entered topic.')
+
+    ---
+    File: d:\Sentiment-Analysis\galaxy_s25_sentiment\sentiment\sentiment_analysis.py
+    ---
+
+    import pandas as pd
+    from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+    import os
+
+    # Load cleaned data
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType
+
+    # Sentiment analysis function
+    analyzer = SentimentIntensityAnalyzer()
+    def get_sentiment(text):
+            score = analyzer.polarity_scores(str(text))["compound"]
+            if score >= 0.05:
+                    return "positive"
+            elif score <= -0.05:
+                    return "negative"
+            else:
+                    return "neutral"
+
+
+
+    # Save to sentiment_all.csv for dashboard
+    os.makedirs("data", exist_ok=True)
+schema = StructType([
+    print(f"✅ Sentiment-labeled data saved to data/sentiment_all.csv with {len(df)} records")
+
+    ---
+    File: d:\Sentiment-Analysis\galaxy_s25_sentiment\sentiment\streaming_sentiment.py
+    ---
+
+    from pyspark.sql import SparkSession
+    from pyspark.sql.functions import from_json, col, udf
+    from pyspark.sql.types import StructType, StringType, IntegerType
+    from textblob import TextBlob
+
+    # ------------------------
+    # Spark session
+    # ------------------------
+    StructField("id", StringType()),
+        .appName("GalaxyS25SentimentStreaming") \
+        .getOrCreate()
+
+    # ------------------------
+    # Kafka config
+    # ------------------------
+    KAFKA_BOOTSTRAP = "localhost:9092"
+    KAFKA_TOPIC = "sentiment-stream"
+
+    # ------------------------
+    # Schema for incoming JSON
+    # ------------------------
+    StructField("title", StringType()),
+        .add("id", StringType()) \
+        .add("title", StringType()) \
+        .add("text", StringType()) \
+        .add("score", IntegerType()) \
+        .add("at", StringType()) \
+        .add("source", StringType())
+
+    # ------------------------
+    # Read from Kafka
+    # ------------------------
+    StructField("text", StringType()),
+        .format("kafka") \
+        .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP) \
+        .option("subscribe", KAFKA_TOPIC) \
+        .option("startingOffsets", "latest") \
+        .load()
+
+    # Convert binary 'value' to string
+    StructField("score", IntegerType()),
+    StructField("at", StringType()),
+
+    # ------------------------
+    # Sentiment analysis UDF
+    # ------------------------
+    StructField("source", StringType())
+        polarity = TextBlob(text).sentiment.polarity
+        if polarity > 0.1:
+            return "positive"
+        elif polarity < -0.1:
+            return "negative"
+        else:
+            return "neutral"
+
+])
+
+
+    # ------------------------
+    # Write output to CSV for Streamlit
+    # ------------------------
+    query = df.writeStream \
+        .outputMode("append") \
+        .format("csv") \
+        .option("path", "data/sentiment_stream_output") \
+        .option("checkpointLocation", "data/checkpoint") \
+        .start()
+
+    query.awaitTermination()
+
+    ---
+    File: d:\Sentiment-Analysis\galaxy_s25_sentiment\transform\clean_data.py
+    ---
+
+    # Clean and merge data
+    import pandas as pd
+    import os
+
+    data_dir = "data"
+
+    # Load Reddit data (if exists)
+    reddit_file = os.path.join(data_dir, "reddit_posts.csv")
+    reddit_df = pd.read_csv(reddit_file) if os.path.exists(reddit_file) else pd.DataFrame()
+
+    if not reddit_df.empty:
+        reddit_df["source"] = "reddit"
+        reddit_df.rename(columns={"title": "text"}, inplace=True)
+    else:
+        reddit_df = pd.DataFrame(columns=["text", "source"])
+
+    # Load Google Play reviews (if exists)
+    google_file = os.path.join(data_dir, "google_reviews.csv")
+    google_df = pd.read_csv(google_file) if os.path.exists(google_file) else pd.DataFrame()
+
+    if not google_df.empty:
+        google_df["source"] = "google"
+        google_df.rename(columns={"content": "text"}, inplace=True)
+    else:
+        google_df = pd.DataFrame(columns=["text", "source"])
+
+
+    # Load Amazon reviews (if exists)
+df_parsed = df_string.select(from_json(col("json_str"), schema).alias("data")).select("data.*")
+
+    if not amazon_df.empty:
+        amazon_df["source"] = "amazon"
+        amazon_df.rename(columns={"review": "text"}, inplace=True)
+    else:
+        amazon_df = pd.DataFrame(columns=["text", "source"])
+
+
+    # Load Flipkart reviews (if exists)
+    flipkart_file = os.path.join(data_dir, "flipkart_reviews_selenium.csv")
+    flipkart_df = pd.read_csv(flipkart_file) if os.path.exists(flipkart_file) else pd.DataFrame()
+    if not flipkart_df.empty:
+        flipkart_df["source"] = "flipkart"
+        flipkart_df.rename(columns={"review": "text"}, inplace=True)
+    else:
+        flipkart_df = pd.DataFrame(columns=["text", "source"])
+
+    # Merge all sources
+    combined_df = pd.concat([
+        reddit_df[["text", "source"]],
+        google_df[["text", "source"]],
+        amazon_df[["text", "source"]],
+        flipkart_df[["text", "source"]]
+    ], ignore_index=True)
+
+
+    # Basic cleaning
+    combined_df["text"] = combined_df["text"].astype(str).str.lower()
+    combined_df["text"] = combined_df["text"].str.replace(r"http\S+|www\S+", "", regex=True)  # remove links
+    combined_df["text"] = combined_df["text"].str.replace(r"[^a-zA-Z0-9\s]", "", regex=True)  # remove special chars
+
+    # Remove empty reviews
+    combined_df = combined_df[combined_df["text"].str.strip() != ""]
+
+    # Optionally trim long reviews for dashboard display (e.g., 500 chars max)
+    combined_df["text"] = combined_df["text"].str.slice(0, 500)
+
+    # Save cleaned dataset
+    os.makedirs(data_dir, exist_ok=True)
+    cleaned_file = os.path.join(data_dir, "cleaned_all.csv")
+    combined_df.to_csv(cleaned_file, index=False)
+
+    print(f"✅ Cleaned data saved to {cleaned_file} with {len(combined_df)} records")
+# -----------------------------
+# Sentiment Analysis
+# -----------------------------
+def get_sentiment(text):
+    if text:
+        polarity = TextBlob(text).sentiment.polarity
+        if polarity > 0.1:
+            return "positive"
+        elif polarity < -0.1:
+            return "negative"
+        else:
+            return "neutral"
+    return "neutral"
+
+sentiment_udf = udf(get_sentiment, StringType())
+df_sentiment = df_parsed.withColumn("sentiment", sentiment_udf(col("text")))
+
+# -----------------------------
+# Output to CSV (or console for testing)
+# -----------------------------
+query = df_sentiment.writeStream \
+    .outputMode("append") \
+    .format("console") \
+    .option("truncate", False) \
+    .start()
+
+query.awaitTermination()
+
+---
+File: d:\Sentiment-Analysis\galaxy_s25_sentiment\dashboard\app.py
+---
+
+import io
+import json
+import os
+import time
+from datetime import datetime
+from typing import Any, Dict, List
+
+import numpy as np
+import pandas as pd
+import plotly.express as px
+import streamlit as st
+from kafka import KafkaConsumer
+from pandas.api.types import is_bool_dtype, is_numeric_dtype
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+
+# -----------------------
+# Configuration
+# -----------------------
+KAFKA_TOPIC = os.environ.get("KAFKA_TOPIC", "sentiment-stream")
+KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "localhost:9092")
+GROUP_ID = os.environ.get("KAFKA_GROUP_ID", "streamlit-dashboard")
+MAX_HISTORY = 500
+MAX_FETCH = 200
+DEFAULT_REFRESH_SECONDS = 5
+KAFKA_TOPICS = os.environ.get("KAFKA_TOPICS")
+CONSUMER_TOPICS = tuple(
+    topic.strip()
+    for topic in (KAFKA_TOPICS.split(",") if KAFKA_TOPICS else [KAFKA_TOPIC])
+    if topic.strip()
+)
+analyzer = SentimentIntensityAnalyzer()
+SOURCE_BADGES = {
+    "Reddit": "🔴 Reddit",
+}
+
+st.set_page_config(page_title="Sentiment Dashboard", layout="wide")
+st.title("Real-time Sentiment Analysis Dashboard")
+st.caption("Monitor live streaming data from Kafka or explore your own datasets with interactive visualizations.")
+
+# -----------------------
+# Sidebar Navigation
+"""
+Real-time Sentiment Analysis Dashboard for Dynamic Topics.
+Fetches data from Reddit, sends to Kafka, analyzes with VADER.
+"""
+
+import json
+import os
+import threading
+"""
+Real-time Sentiment Analysis Dashboard for Dynamic Topics.
+Fetches data from Reddit, sends to Kafka, analyzes with VADER.
+"""
+
+import json
+import os
+import threading
+import time
+from collections import defaultdict, deque
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import streamlit as st
+from dotenv import load_dotenv
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+
+# Load environment variables
+load_dotenv(override=True)
+
+# Kafka imports
+try:
+    from kafka import KafkaConsumer, KafkaProducer
+except ImportError:
+    KafkaConsumer = None
+    KafkaProducer = None
+
+# Import custom extractors (Reddit-only)
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'extract'))
+from extractors import extract_reddit_reviews
+
+# -----------------------
+# Configuration
+# -----------------------
+KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "localhost:9092")
+KAFKA_TOPIC = os.environ.get("KAFKA_TOPIC", "sentiment-stream")
+MAX_CACHE = 500  # Max messages to keep in memory
+MAX_FETCH_PER_REFRESH = 100
+
+# VADER Sentiment Analyzer
+analyzer = SentimentIntensityAnalyzer()
+
+
+# -----------------------
+# Streamlit Page Config
+# -----------------------
+st.set_page_config(
+    page_title="Real-time Sentiment Analyzer",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+st.title("📊 Real-time Sentiment Analysis Dashboard")
+st.markdown("### Analyze sentiment trends for any product or topic dynamically")
+
+
+# -----------------------
+# Session State Initialization
+# -----------------------
+def initialize_session_state():
+    """Initialize all required session state variables."""
+    if "data_cache" not in st.session_state:
+        st.session_state.data_cache = deque(maxlen=MAX_CACHE)
+    
+    if "topic" not in st.session_state:
+        st.session_state.topic = ""
+    
+    if "streaming_active" not in st.session_state:
+        st.session_state.streaming_active = False
+    
+    if "last_update_time" not in st.session_state:
+        st.session_state.last_update_time = None
+    
+    if "extraction_thread" not in st.session_state:
+        st.session_state.extraction_thread = None
+    
+    if "producer" not in st.session_state:
+        st.session_state.producer = None
+    
+    if "consumer" not in st.session_state:
+        st.session_state.consumer = None
+
+
+initialize_session_state()
+
+
+# -----------------------
+# Kafka Utilities
+# -----------------------
+@st.cache_resource
+def get_kafka_producer():
+    """Get or create Kafka producer."""
+    if KafkaProducer is None:
+        st.error("kafka-python not installed. Install with: pip install kafka-python")
+        return None
+    
+    try:
+        return KafkaProducer(
+            bootstrap_servers=KAFKA_BOOTSTRAP,
+            value_serializer=lambda v: json.dumps(v).encode("utf-8"),
+            retries=3,
+        )
+    except Exception as e:
+        st.error(f"Failed to connect to Kafka: {e}")
+        return None
+
+
+@st.cache_resource
+def get_kafka_consumer():
+    """Get or create Kafka consumer."""
+    if KafkaConsumer is None:
+        st.error("kafka-python not installed. Install with: pip install kafka-python")
+        return None
+    
+    try:
+        consumer = KafkaConsumer(
+            KAFKA_TOPIC,
+            bootstrap_servers=KAFKA_BOOTSTRAP,
+            auto_offset_reset="latest",
+            enable_auto_commit=True,
+            group_id="sentiment-dashboard",
+            value_deserializer=lambda m: json.loads(m.decode("utf-8")),
+            consumer_timeout_ms=1000,
+            max_poll_records=MAX_FETCH_PER_REFRESH,
+        )
+        return consumer
+    except Exception as e:
+        st.error(f"Failed to connect to Kafka: {e}")
+        return None
+
+
+def send_to_kafka(producer, data: Dict):
+    """Send a single message to Kafka."""
+    if producer is None:
+        return False
+    
+    try:
+        producer.send(KAFKA_TOPIC, value=data)
+        producer.flush()
+        return True
+    except Exception as e:
+        st.warning(f"Failed to send to Kafka: {e}")
+        return False
+
+
+def consume_from_kafka(consumer, max_records: int = MAX_FETCH_PER_REFRESH) -> List[Dict]:
+    """Consume messages from Kafka and perform sentiment analysis."""
+    if consumer is None:
+        return []
+    
+    messages = []
+    try:
+        polled_data = consumer.poll(timeout_ms=500, max_records=max_records)
+        for partition_records in polled_data.values():
+            for message in partition_records:
+                data = message.value
+                
+                # Perform VADER sentiment analysis
+                text = data.get("text", "") or ""
+                scores = analyzer.polarity_scores(text)
+                
+                # Determine sentiment
+                compound = scores["compound"]
+                if compound >= 0.05:
+                    sentiment = "Positive"
+                elif compound <= -0.05:
+                    sentiment = "Negative"
+                else:
+                    sentiment = "Neutral"
+                
+                data["sentiment"] = sentiment
+                data["compound_score"] = compound
+                data["received_at"] = datetime.now().isoformat()
+                
+                messages.append(data)
+    except Exception as e:
+        st.warning(f"Error consuming from Kafka: {e}")
+    
+    return messages
+
+
+# -----------------------
+# Data Extraction Functions
+# -----------------------
+def extract_reddit_data(topic: str, producer) -> Tuple[int, int]:
+    """Extract Reddit posts and send to Kafka."""
+    sent_count = 0
+    error_count = 0
+    
+    try:
+        posts = extract_reddit_reviews(topic, limit=50)
+        
+        for post in posts:
+            data = {
+                "id": post.get("id"),
+                "title": post.get("title", ""),
+                "text": post.get("text", ""),
+                "score": post.get("score", 0),
+                "timestamp": post.get("date", ""),
+                "source": "Reddit",
+            }
+            
+            if send_to_kafka(producer, data):
+                sent_count += 1
+            else:
+                error_count += 1
+    except Exception as e:
+        st.warning(f"Error extracting Reddit data: {e}")
+        error_count += 1
+    
+    return sent_count, error_count
+
+
+def data_extraction_loop(topic: str, producer, stop_event):
+    """Continuously extract data from Reddit."""
+    while not stop_event.is_set():
+        try:
+            reddit_sent, reddit_err = extract_reddit_data(topic, producer)
+            
+            # Wait before next extraction
+            time.sleep(10)
+        except Exception as e:
+            st.warning(f"Extraction loop error: {e}")
+            time.sleep(5)
+
+
+# -----------------------
+# Sentiment Analysis & Processing
+# -----------------------
+def process_kafka_messages(consumer) -> int:
+    """Consume and process messages from Kafka."""
+    messages = consume_from_kafka(consumer)
+    
+    for msg in messages:
+        st.session_state.data_cache.append(msg)
+    
+    st.session_state.last_update_time = datetime.now()
+    return len(messages)
+
+
+def get_sentiment_distribution() -> Dict[str, int]:
+    """Calculate sentiment distribution from cached data."""
+    distribution = defaultdict(int)
+    
+    for item in st.session_state.data_cache:
+        sentiment = item.get("sentiment", "Unknown")
+        distribution[sentiment] += 1
+    
+    return dict(distribution)
+
+
+def get_top_reviews(sentiment_type: str, top_n: int = 5) -> pd.DataFrame:
+    """Get top N reviews by sentiment and score."""
+    filtered = [
+        item for item in st.session_state.data_cache
+        if item.get("sentiment") == sentiment_type
+    ]
+    
+    if not filtered:
+        return pd.DataFrame()
+    
+    df = pd.DataFrame(filtered)
+    df = df.sort_values("score", ascending=(sentiment_type == "Negative"))
+    df = df[["text", "source", "score", "sentiment"]].head(top_n)
+    
+    return df
+
+
+def get_sentiment_over_time() -> pd.DataFrame:
+    """Prepare data for sentiment trend visualization."""
+    if not st.session_state.data_cache:
+        return pd.DataFrame()
+    
+    df = pd.DataFrame(st.session_state.data_cache)
+    
+    if "received_at" in df.columns:
+        df["received_at"] = pd.to_datetime(df["received_at"], errors="coerce")
+        df = df.sort_values("received_at")
+        
+        # Group by time and sentiment
+        df_grouped = df.groupby([pd.Grouper(key="received_at", freq="1min"), "sentiment"]).size().reset_index(name="count")
+        return df_grouped
+    
+    return pd.DataFrame()
+
+
+def get_source_distribution() -> Dict[str, int]:
+    """Get count of reviews from each source."""
+    distribution = defaultdict(int)
+    
+    for item in st.session_state.data_cache:
+        source = item.get("source", "Unknown")
+        distribution[source] += 1
+    
+    return dict(distribution)
+
+
+# -----------------------
+# UI Layout
+# -----------------------
+
+# Sidebar Controls
+with st.sidebar:
+    st.header("⚙️ Controls")
+    
+    # Topic input
+    topic_input = st.text_input(
+        "Enter Topic/Product Name:",
+        value=st.session_state.topic,
+        placeholder="e.g., Pixel 8, iPhone 17, Tesla Model 3",
+        help="Search for sentiment data for any product or topic"
+    )
+    
+    if topic_input != st.session_state.topic:
+        st.session_state.topic = topic_input
+        st.session_state.data_cache.clear()
+        st.session_state.last_update_time = None
+    
+    st.divider()
+    
+    # Streaming controls
+    st.subheader("📡 Streaming")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("▶️ Start Streaming", use_container_width=True):
+            if not st.session_state.topic:
+                st.error("Please enter a topic first!")
+            else:
+                st.session_state.streaming_active = True
+                st.rerun()
+    
+    with col2:
+        if st.button("⏸️ Stop Streaming", use_container_width=True):
+            st.session_state.streaming_active = False
+            st.rerun()
+    
+    refresh_button = st.button(
+        "🔄 Refresh Once",
+        use_container_width=True,
+        help="Manually refresh data from Kafka"
+    )
+    
+    refresh_interval = st.slider(
+        "Refresh interval (seconds):",
+        min_value=3,
+        max_value=30,
+        value=5,
+        step=1
+    )
+    
+    st.divider()
+    
+    # Display stats
+    st.subheader("📊 Stats")
+    st.metric("Cached Items", len(st.session_state.data_cache))
+    
+    if st.session_state.last_update_time:
+        st.caption(f"Last updated: {st.session_state.last_update_time.strftime('%H:%M:%S')}")
+    else:
+        st.caption("Not updated yet")
+    
+    st.divider()
+    
+    st.subheader("ℹ️ Info")
+    st.markdown("""
+    **How it works:**
+    1. Enter a topic name
+    2. Click "Start Streaming"
+    3. Data fetched from Reddit
+    4. Sentiment analyzed with VADER
+    5. Results displayed in real-time
+    
+    **Source:**
+    - 🔴 Reddit posts
+    """)
+
+
+# Main Content
+if not st.session_state.topic:
+    st.info("👈 Enter a topic in the sidebar to get started!")
+else:
+    # Producer and Consumer setup
+    producer = get_kafka_producer()
+    consumer = get_kafka_consumer()
+    
+    # Fetch data if streaming or refresh button clicked
+    if st.session_state.streaming_active or refresh_button:
+        if producer is None or consumer is None:
+            st.error("❌ Kafka connection failed. Make sure Kafka is running on localhost:9092")
+        else:
+            status_placeholder = st.empty()
+            
+            with status_placeholder.container():
+                st.info(f"🔍 Searching for: **{st.session_state.topic}**")
+            
+            # Fetch from Reddit only
+            reddit_sent, reddit_err = extract_reddit_data(st.session_state.topic, producer)
+            
+            status_placeholder.empty()
+            
+            if reddit_sent > 0:
+                st.toast(f"✅ Extracted {reddit_sent} items from Reddit")
+            
+            # Consume and process
+            processed = process_kafka_messages(consumer)
+    
+    # Display results
+    if len(st.session_state.data_cache) == 0:
+        st.warning("No data yet. Click 'Start Streaming' or 'Refresh Once' to fetch data.")
+    else:
+        # Key Metrics
+        st.subheader("📈 Sentiment Overview")
+        
+        sentiment_dist = get_sentiment_distribution()
+        source_dist = get_source_distribution()
+        
+        metric_cols = st.columns(4)
+        
+        with metric_cols[0]:
+            total = len(st.session_state.data_cache)
+            st.metric("Total Items", total)
+        
+        with metric_cols[1]:
+            positive_count = sentiment_dist.get("Positive", 0)
+            positive_pct = (positive_count / total * 100) if total > 0 else 0
+            st.metric("😊 Positive", f"{positive_count} ({positive_pct:.1f}%)")
+        
+        with metric_cols[2]:
+            neutral_count = sentiment_dist.get("Neutral", 0)
+            neutral_pct = (neutral_count / total * 100) if total > 0 else 0
+            st.metric("😐 Neutral", f"{neutral_count} ({neutral_pct:.1f}%)")
+        
+        with metric_cols[3]:
+            negative_count = sentiment_dist.get("Negative", 0)
+            negative_pct = (negative_count / total * 100) if total > 0 else 0
+            st.metric("😞 Negative", f"{negative_count} ({negative_pct:.1f}%)")
+        
+        # Visualizations
+        st.divider()
+        st.subheader("📊 Visualizations")
+        
+        viz_tabs = st.tabs(["Sentiment Pie", "Sentiment Trend", "Source Distribution", "Top Reviews"])
+        
+        with viz_tabs[0]:
+            # Sentiment pie chart
+            if sentiment_dist:
+                fig = px.pie(
+                    values=list(sentiment_dist.values()),
+                    names=list(sentiment_dist.keys()),
+                    title=f"Sentiment Distribution for '{st.session_state.topic}'",
+                    color_discrete_map={
+                        "Positive": "#2ecc71",
+                        "Neutral": "#95a5a6",
+                        "Negative": "#e74c3c"
+                    }
+                )
+                fig.update_traces(textposition="inside", textinfo="percent+label")
+                st.plotly_chart(fig, use_container_width=True)
+        
+        with viz_tabs[1]:
+            # Sentiment over time
+            df_time = get_sentiment_over_time()
+            
+            if not df_time.empty:
+                fig = px.bar(
+                    df_time,
+                    x="received_at",
+                    y="count",
+                    color="sentiment",
+                    title="Sentiment Trend Over Time",
+                    color_discrete_map={
+                        "Positive": "#2ecc71",
+                        "Neutral": "#95a5a6",
+                        "Negative": "#e74c3c"
+                    }
+                )
+                fig.update_layout(hovermode="x unified")
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Not enough data for trend visualization yet.")
+        
+        with viz_tabs[2]:
+            # Source distribution (Reddit-only)
+            if source_dist:
+                fig = px.bar(
+                    x=list(source_dist.keys()),
+                    y=list(source_dist.values()),
+                    title="Reviews by Source",
+                    labels={"x": "Source", "y": "Count"},
+                    color=list(source_dist.keys()),
+                    color_discrete_map={
+                        "Reddit": "#ff4500",
+                    }
+                )
+                st.plotly_chart(fig, use_container_width=True)
+        
+        with viz_tabs[3]:
+            # Top reviews
+            review_cols = st.columns(2)
+            
+            with review_cols[0]:
+                st.markdown("### 🟢 Top Positive Reviews")
+                top_positive = get_top_reviews("Positive", 5)
+                
+                if not top_positive.empty:
+                    for idx, row in top_positive.iterrows():
+                        with st.container(border=True):
+                            st.markdown(f"**Source:** {row['source']}")
+                            st.write(row['text'][:200] + "..." if len(row['text']) > 200 else row['text'])
+                            st.caption(f"Score: {row['score']}")
+                else:
+                    st.info("No positive reviews yet.")
+            
+            with review_cols[1]:
+                st.markdown("### 🔴 Top Negative Reviews")
+                top_negative = get_top_reviews("Negative", 5)
+                
+                if not top_negative.empty:
+                    for idx, row in top_negative.iterrows():
+                        with st.container(border=True):
+                            st.markdown(f"**Source:** {row['source']}")
+                            st.write(row['text'][:200] + "..." if len(row['text']) > 200 else row['text'])
+                            st.caption(f"Score: {row['score']}")
+                else:
+                    st.info("No negative reviews yet.")
+        
+        # Raw data table
+        st.divider()
+        st.subheader("📋 Recent Data")
+        
+        if len(st.session_state.data_cache) > 0:
+            df_display = pd.DataFrame(list(st.session_state.data_cache)).iloc[::-1]
+            display_cols = ["source", "text", "sentiment", "compound_score", "score"]
+            available_cols = [col for col in display_cols if col in df_display.columns]
+            
+            st.dataframe(
+                df_display[available_cols].head(20),
+                use_container_width=True,
+                height=400
+            )
+
+
+# Auto-refresh
+if st.session_state.streaming_active and len(st.session_state.data_cache) > 0:
+    time.sleep(refresh_interval)
+    st.rerun()
+
+---
+File: d:\Sentiment-Analysis\galaxy_s25_sentiment\dashboard\kafka_realtime_app.py
+---
+
+"""Legacy/demo Kafka real-time dashboard.
+
+For the primary real-time experience (multi-source + history view),
+use `realtime_dashboard.py`. This app is kept as a simpler demo.
+"""
+
+import streamlit as st
+import threading
+import time
+import json
+from collections import deque, defaultdict
+from datetime import datetime
+from typing import Deque
+
+import pandas as pd
+import plotly.express as px
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+
+try:
+    from kafka import KafkaProducer, KafkaConsumer
+except Exception:
+    KafkaProducer = None
+    KafkaConsumer = None
+
+# reuse extractor helper
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'extract'))
+from extractors import extract_reddit_reviews
+
+# PostgreSQL helper for optional snapshot storage
+# Add the project root so we can import `load.postgres_utils` like in tests.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+try:
+    from load.postgres_utils import store_topic_snapshot
+    POSTGRES_AVAILABLE = True
+    POSTGRES_IMPORT_ERROR = None
+except Exception as e:
+    POSTGRES_AVAILABLE = False
+    POSTGRES_IMPORT_ERROR = str(e)
+
+try:
+    from wordcloud import WordCloud
+    WORDCLOUD_AVAILABLE = True
+except Exception:
+    WORDCLOUD_AVAILABLE = False
+
+
+st.set_page_config(page_title="Kafka Real-time Sentiment (Demo)", layout="wide")
+st.title("📡 Kafka Real-time Sentiment Stream (Demo)")
+st.info("This is a legacy/demo dashboard. For the full multi-source, history-enabled experience, use `realtime_dashboard.py`.")
+
+# Kafka configuration: prefer environment variables, fall back to sensible defaults.
+KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "localhost:9092")
+KAFKA_TOPIC = os.environ.get("KAFKA_TOPIC", "sentiment-stream")
+
+analyzer = SentimentIntensityAnalyzer()
+
+
+def make_producer(bootstrap_servers: str):
+    if KafkaProducer is None:
+        return None
+    return KafkaProducer(
+        bootstrap_servers=bootstrap_servers,
+        value_serializer=lambda v: json.dumps(v).encode("utf-8"),
+        retries=3,
+    )
+
+
+def make_consumer(bootstrap_servers: str, topic: str):
+    if KafkaConsumer is None:
+        return None
+    try:
+        consumer = KafkaConsumer(
+            topic,
+            bootstrap_servers=bootstrap_servers,
+            auto_offset_reset="latest",
+            enable_auto_commit=True,
+            value_deserializer=lambda m: json.loads(m.decode("utf-8")),
+            consumer_timeout_ms=1000,
+            max_poll_records=100,
+        )
+        return consumer
+    except Exception:
+        return None
+
+
+def producer_loop(topic_name: str, stop_event: threading.Event, producer, kafka_topic: str):
+    """Continuously fetch Reddit posts for topic_name and send to Kafka."""
+    while not stop_event.is_set():
+        try:
+            posts = extract_reddit_reviews(topic_name, limit=50)
+            for post in posts:
+                data = {
+                    "id": post.get("id"),
+                    "title": post.get("title", ""),
+                    "text": post.get("text", ""),
+                    "score": post.get("score", 0),
+                    "timestamp": post.get("date", datetime.utcnow().isoformat()),
+                    "source": "Reddit",
+                    "topic": topic_name,
+                }
+                try:
+                    if producer:
+                        producer.send(kafka_topic, value=data)
+                except Exception:
+                    # ignore send errors; consumer will handle missing data
+                    pass
+
+        except Exception:
+            # swallow exceptions to keep thread alive
+            pass
+
+        # flush once per cycle if producer exists
+        try:
+            if producer:
+                producer.flush()
+        except Exception:
+            pass
+
+        # wait a bit before next fetch
+        for _ in range(10):
+            if stop_event.is_set():
+                break
+            time.sleep(1)
+
+
+def consumer_loop(stop_event: threading.Event, consumer, data_cache: Deque, cache_lock: threading.Lock):
+    """Consume messages from Kafka and append processed sentiment results to data_cache."""
+    while not stop_event.is_set():
+        try:
+            # Poll records
+            if consumer is None:
+                time.sleep(1)
+                continue
+
+            polled = consumer.poll(timeout_ms=500, max_records=100)
+            for records in polled.values():
+                for msg in records:
+                    data = msg.value
+                    text = (data.get("text") or data.get("title") or "")
+                    scores = analyzer.polarity_scores(str(text))
+                    compound = scores.get("compound", 0.0)
+                    if compound >= 0.05:
+                        sentiment = "Positive"
+                    elif compound <= -0.05:
+                        sentiment = "Negative"
+                    else:
+                        sentiment = "Neutral"
+
+                    entry = {
+                        "source": data.get("source", "Unknown"),
+                        "text": text,
+                        "sentiment": sentiment,
+                        "compound_score": compound,
+                        "timestamp": data.get("timestamp") or datetime.utcnow().isoformat(),
+                    }
+
+                    with cache_lock:
+                        data_cache.append(entry)
+
+        except Exception:
+            # keep consumer alive
+            time.sleep(1)
+
+
+def build_wordcloud(texts):
+    if not WORDCLOUD_AVAILABLE or not texts:
+        return None
+    joined = " ".join(texts)
+    wc = WordCloud(width=800, height=400, background_color="white").generate(joined)
+    return wc
+
+
+def initialize_session():
+    if "data_cache" not in st.session_state:
+        st.session_state.data_cache = deque(maxlen=2000)
+    if "cache_lock" not in st.session_state:
+        st.session_state.cache_lock = threading.Lock()
+    if "producer_thread" not in st.session_state:
+        st.session_state.producer_thread = None
+    if "consumer_thread" not in st.session_state:
+        st.session_state.consumer_thread = None
+    if "producer_stop" not in st.session_state:
+        st.session_state.producer_stop = None
+    if "consumer_stop" not in st.session_state:
+        st.session_state.consumer_stop = None
+    if "producer" not in st.session_state:
+        st.session_state.producer = None
+    if "consumer" not in st.session_state:
+        st.session_state.consumer = None
+    if "streaming_active" not in st.session_state:
+        st.session_state.streaming_active = False
+    if "current_topic" not in st.session_state:
+        st.session_state.current_topic = ""
+    if "auto_refresh" not in st.session_state:
+        st.session_state.auto_refresh = True
+
+
+initialize_session()
+
+
+with st.sidebar:
+    st.header("Controls")
+    topic = st.text_input("Enter topic name", value=st.session_state.current_topic)
+    start_btn = st.button("Start Stream")
+    stop_btn = st.button("Stop Stream")
+    refresh_interval = st.slider("Refresh interval (sec)", min_value=2, max_value=30, value=5)
+    st.session_state.auto_refresh = st.checkbox(
+        "Auto-refresh while streaming",
+        value=st.session_state.auto_refresh,
+        help="Uncheck to pause automatic dashboard refresh.",
+    )
+
+
+def stop_stream():
+    # Signal stop events and join threads
+    if st.session_state.producer_stop is not None:
+        st.session_state.producer_stop.set()
+    if st.session_state.consumer_stop is not None:
+        st.session_state.consumer_stop.set()
+
+    # join threads if alive
+    try:
+        if st.session_state.producer_thread is not None and st.session_state.producer_thread.is_alive():
+            st.session_state.producer_thread.join(timeout=2)
+    except Exception:
+        pass
+
+    try:
+        if st.session_state.consumer_thread is not None and st.session_state.consumer_thread.is_alive():
+            st.session_state.consumer_thread.join(timeout=2)
+    except Exception:
+        pass
+
+    # close kafka connections
+    try:
+        if st.session_state.producer is not None:
+            st.session_state.producer.close()
+    except Exception:
+        pass
+
+    try:
+        if st.session_state.consumer is not None:
+            st.session_state.consumer.close()
+    except Exception:
+        pass
+
+    st.session_state.producer_thread = None
+    st.session_state.consumer_thread = None
+    st.session_state.producer_stop = None
+    st.session_state.consumer_stop = None
+    st.session_state.producer = None
+    st.session_state.consumer = None
+    st.session_state.streaming_active = False
+    st.session_state.current_topic = ""
+
+
+if stop_btn:
+    stop_stream()
+    st.success("Streaming stopped")
+
+
+if start_btn:
+    if not topic or not topic.strip():
+        st.error("Please enter a topic")
+    else:
+        # If already streaming a different topic, stop it first
+        if st.session_state.streaming_active and st.session_state.current_topic != topic:
+            stop_stream()
+
+        st.session_state.current_topic = topic
+        st.session_state.streaming_active = True
+
+        # create kafka producer & consumer
+        producer = make_producer(KAFKA_BOOTSTRAP)
+        consumer = make_consumer(KAFKA_BOOTSTRAP, KAFKA_TOPIC)
+        st.session_state.producer = producer
+        st.session_state.consumer = consumer
+
+        # create stop events
+        prod_stop = threading.Event()
+        cons_stop = threading.Event()
+        st.session_state.producer_stop = prod_stop
+        st.session_state.consumer_stop = cons_stop
+
+        # start producer thread
+        p_thread = threading.Thread(target=producer_loop, args=(topic, prod_stop, producer, KAFKA_TOPIC), daemon=True)
+        c_thread = threading.Thread(target=consumer_loop, args=(cons_stop, consumer, st.session_state.data_cache, st.session_state.cache_lock), daemon=True)
+
+        st.session_state.producer_thread = p_thread
+        st.session_state.consumer_thread = c_thread
+
+        p_thread.start()
+        c_thread.start()
+
+        st.success(f"Started streaming for topic: {topic}")
+
+
+# Display live metrics and charts
+st.header("Live sentiment")
+cols = st.columns(3)
+with st.container():
+    with st.session_state.cache_lock:
+        df = pd.DataFrame(list(st.session_state.data_cache)) if st.session_state.data_cache else pd.DataFrame()
+
+    if df.empty:
+        st.info("No messages yet. Start the stream to begin consuming live messages.")
+    else:
+        total = len(df)
+        pos = (df['sentiment'] == 'Positive').sum()
+        neu = (df['sentiment'] == 'Neutral').sum()
+        neg = (df['sentiment'] == 'Negative').sum()
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Total", total)
+        c2.metric("Positive", f"{pos} ({pos/total*100:.1f}% )")
+        c3.metric("Negative", f"{neg} ({neg/total*100:.1f}% )")
+
+        # Optional manual snapshot to PostgreSQL for later analysis
+        if POSTGRES_AVAILABLE:
+            if st.button("💾 Save this snapshot to database", use_container_width=False):
+                try:
+                    # Use the full in-memory cache so the snapshot reflects
+                    # everything seen so far for this topic.
+                    with st.session_state.cache_lock:
+                        messages = list(st.session_state.data_cache)
+
+                    topic_name = st.session_state.current_topic or "unknown-topic"
+                    summary_id = store_topic_snapshot(topic_name, messages)
+                    if summary_id:
+                        st.success(f"Snapshot saved for topic '{topic_name}' (summary id: {summary_id}).")
+                    else:
+                        st.info("Nothing to save yet (no aggregated messages).")
+                except Exception as e:
+                    st.error(f"Failed to save snapshot: {e}")
+        else:
+            msg = "PostgreSQL integration not available; install/configure it to enable saving snapshots."
+            if POSTGRES_IMPORT_ERROR:
+                msg += f" (Import error: {POSTGRES_IMPORT_ERROR})"
+            st.caption(msg)
+
+        # Pie chart
+        counts = df['sentiment'].value_counts().reindex(['Positive','Neutral','Negative']).fillna(0)
+        fig_pie = px.pie(values=counts.values, names=counts.index, title="Sentiment Distribution")
+        st.plotly_chart(fig_pie, use_container_width=True)
+
+        # Recent posts
+        st.markdown("### Recent posts")
+        st.dataframe(df[['timestamp','source','sentiment','compound_score','text']].head(50), use_container_width=True)
+
+        # Word cloud
+        st.markdown("### Word Cloud")
+        texts = df['text'].astype(str).tolist()
+        if WORDCLOUD_AVAILABLE and texts:
+            wc = build_wordcloud(texts)
+            if wc is not None:
+                import matplotlib.pyplot as plt
+                fig, ax = plt.subplots(figsize=(10,4))
+                ax.imshow(wc, interpolation='bilinear')
+                ax.axis('off')
+                st.pyplot(fig)
+        else:
+            st.info("Install `wordcloud` to see a word cloud, otherwise top terms will appear below.")
+            # top terms fallback
+            from collections import Counter
+            import re
+            tokens = []
+            for t in texts:
+                words = re.findall(r"\w{3,}", t.lower())
+                tokens.extend([w for w in words if not w.isnumeric()])
+            top = Counter(tokens).most_common(30)
+            if top:
+                top_df = pd.DataFrame(top, columns=['term','count'])
+                fig_terms = px.bar(top_df, x='term', y='count', title='Top terms')
+                st.plotly_chart(fig_terms, use_container_width=True)
+
+
+# Auto-refresh while streaming
+if st.session_state.streaming_active and st.session_state.auto_refresh:
+    time.sleep(refresh_interval)
+    # Streamlit >= 1.32 uses st.rerun; keep a tiny fallback for older versions.
+    try:
+        st.rerun()
+    except AttributeError:  # pragma: no cover
+        st.experimental_rerun()
+
+---
+File: d:\Sentiment-Analysis\galaxy_s25_sentiment\dashboard\realtime_dashboard.py
+---
+
+"""
+Real-time Sentiment Analysis Dashboard for Dynamic Topics.
+Fetches data from Reddit, sends to Kafka, analyzes with VADER.
+"""
+
+import json
+import os
+import threading
+import time
+from collections import defaultdict, deque
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import streamlit as st
+from dotenv import load_dotenv
+import sys
+
+# Diagnostic: show which Python executable is running this Streamlit process
+print("STREAMLIT PYTHON:", sys.executable)
+
+# Guarded import for VADER so logs show helpful info if it fails
+try:
+    from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+except Exception as e:
+    # Print diagnostic to the Streamlit logs and re-raise so the traceback is visible
+    print("Failed to import vaderSentiment:", e, "(python:", sys.executable, ")")
+    raise
+
+# Load environment variables
+load_dotenv(override=True)
+
+# Kafka imports
+try:
+    from kafka import KafkaConsumer, KafkaProducer
+except ImportError:
+    KafkaConsumer = None
+    KafkaProducer = None
+
+# Import custom extractors (Reddit-only)
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'extract'))
+from extractors import extract_reddit_reviews
+
+# Import PostgreSQL helpers for summaries & history
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'load'))
+try:
+    from postgres_utils import (
+        store_topic_snapshot,
+        fetch_topic_summaries,
+        fetch_topic_top_reviews,
+    )
+    POSTGRES_AVAILABLE = True
+except Exception:
+    # Dashboard should still work without PostgreSQL
+    POSTGRES_AVAILABLE = False
+
+# -----------------------
+# Configuration
+# -----------------------
+KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "localhost:9092")
+KAFKA_TOPIC = os.environ.get("KAFKA_TOPIC", "sentiment-stream")
+MAX_CACHE = 500  # Max messages to keep in memory
+MAX_FETCH_PER_REFRESH = 100
+
+# VADER Sentiment Analyzer
+analyzer = SentimentIntensityAnalyzer()
+
+
+# -----------------------
+# Streamlit Page Config
+# -----------------------
+st.set_page_config(
+    page_title="Real-time Sentiment Analyzer",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+st.title("📊 Real-time Sentiment Analysis Dashboard")
+st.markdown("### Analyze sentiment trends for any product or topic dynamically")
+
+
+# -----------------------
+# Session State Initialization
+# -----------------------
+def initialize_session_state():
+    """Initialize all required session state variables."""
+    if "data_cache" not in st.session_state:
+        st.session_state.data_cache = deque(maxlen=MAX_CACHE)
+    
+    if "topic" not in st.session_state:
+        st.session_state.topic = ""
+    
+    if "streaming_active" not in st.session_state:
+        st.session_state.streaming_active = False
+    
+    if "last_update_time" not in st.session_state:
+        st.session_state.last_update_time = None
+    
+    if "extraction_thread" not in st.session_state:
+        st.session_state.extraction_thread = None
+    
+    if "producer" not in st.session_state:
+        st.session_state.producer = None
+    
+    if "consumer" not in st.session_state:
+        st.session_state.consumer = None
+    
+    if "auto_refresh" not in st.session_state:
+        st.session_state.auto_refresh = True
+
+
+initialize_session_state()
+
+
+# -----------------------
+# Kafka Utilities
+# -----------------------
+@st.cache_resource
+def get_kafka_producer():
+    """Get or create Kafka producer."""
+    if KafkaProducer is None:
+        st.error("kafka-python not installed. Install with: pip install kafka-python")
+        return None
+    
+    try:
+        return KafkaProducer(
+            bootstrap_servers=KAFKA_BOOTSTRAP,
+            value_serializer=lambda v: json.dumps(v).encode("utf-8"),
+            retries=3,
+        )
+    except Exception as e:
+        st.error(f"Failed to connect to Kafka: {e}")
+        return None
+
+
+@st.cache_resource
+def get_kafka_consumer():
+    """Get or create Kafka consumer."""
+    if KafkaConsumer is None:
+        st.error("kafka-python not installed. Install with: pip install kafka-python")
+        return None
+    
+    try:
+        consumer = KafkaConsumer(
+            KAFKA_TOPIC,
+            bootstrap_servers=KAFKA_BOOTSTRAP,
+            auto_offset_reset="latest",
+            enable_auto_commit=True,
+            group_id="sentiment-dashboard",
+            value_deserializer=lambda m: json.loads(m.decode("utf-8")),
+            consumer_timeout_ms=1000,
+            max_poll_records=MAX_FETCH_PER_REFRESH,
+        )
+        return consumer
+    except Exception as e:
+        st.error(f"Failed to connect to Kafka: {e}")
+        return None
+
+
+def send_to_kafka(producer, data: Dict):
+    """Send a single message to Kafka."""
+    if producer is None:
+        return False
+    
+    try:
+        producer.send(KAFKA_TOPIC, value=data)
+        producer.flush()
+        return True
+    except Exception as e:
+        st.warning(f"Failed to send to Kafka: {e}")
+        return False
+
+
+def consume_from_kafka(consumer, max_records: int = MAX_FETCH_PER_REFRESH) -> List[Dict]:
+    """Consume messages from Kafka and perform sentiment analysis."""
+    if consumer is None:
+        return []
+    
+    messages = []
+    try:
+        polled_data = consumer.poll(timeout_ms=500, max_records=max_records)
+        for partition_records in polled_data.values():
+            for message in partition_records:
+                data = message.value
+                
+                # Perform VADER sentiment analysis
+                text = data.get("text", "") or ""
+                scores = analyzer.polarity_scores(text)
+                
+                # Determine sentiment
+                compound = scores["compound"]
+                if compound >= 0.05:
+                    sentiment = "Positive"
+                elif compound <= -0.05:
+                    sentiment = "Negative"
+                else:
+                    sentiment = "Neutral"
+                
+                data["sentiment"] = sentiment
+                data["compound_score"] = compound
+                data["received_at"] = datetime.now().isoformat()
+                
+                messages.append(data)
+    except Exception as e:
+        st.warning(f"Error consuming from Kafka: {e}")
+    
+    return messages
+
+
+# -----------------------
+# Data Extraction Functions
+# -----------------------
+def extract_reddit_data(topic: str, producer) -> Tuple[int, int]:
+    """Extract Reddit posts and send to Kafka."""
+    sent_count = 0
+    error_count = 0
+    
+    try:
+        posts = extract_reddit_reviews(topic, limit=50)
+        
+        for post in posts:
+            data = {
+                "id": post.get("id"),
+                "title": post.get("title", ""),
+                "text": post.get("text", ""),
+                "score": post.get("score", 0),
+                "timestamp": post.get("date", ""),
+                "source": "Reddit",
+            }
+            
+            if send_to_kafka(producer, data):
+                sent_count += 1
+            else:
+                error_count += 1
+    except Exception as e:
+        st.warning(f"Error extracting Reddit data: {e}")
+        error_count += 1
+    
+    return sent_count, error_count
+
+
+def data_extraction_loop(topic: str, producer, stop_event):
+    """Continuously extract data from Reddit."""
+    while not stop_event.is_set():
+        try:
+            reddit_sent, reddit_err = extract_reddit_data(topic, producer)
+            
+            # Wait before next extraction
+            time.sleep(10)
+        except Exception as e:
+            st.warning(f"Extraction loop error: {e}")
+            time.sleep(5)
+
+
+# -----------------------
+# Sentiment Analysis & Processing
+# -----------------------
+def process_kafka_messages(consumer) -> int:
+    """Consume and process messages from Kafka."""
+    messages = consume_from_kafka(consumer)
+    
+    for msg in messages:
+        st.session_state.data_cache.append(msg)
+    
+    st.session_state.last_update_time = datetime.now()
+
+    # Optionally persist a snapshot of the current topic to PostgreSQL
+    # so that historical summaries and top reviews can be plotted later.
+    if POSTGRES_AVAILABLE and messages and st.session_state.topic:
+        try:
+            # Use the full cache so the snapshot reflects all data seen
+            # so far for this topic.
+            store_topic_snapshot(st.session_state.topic, st.session_state.data_cache)
+        except Exception:
+            # Swallow DB errors to avoid breaking the live dashboard.
+            pass
+
+    return len(messages)
+
+
+def get_sentiment_distribution() -> Dict[str, int]:
+    """Calculate sentiment distribution from cached data."""
+    distribution = defaultdict(int)
+    
+    for item in st.session_state.data_cache:
+        sentiment = item.get("sentiment", "Unknown")
+        distribution[sentiment] += 1
+    
+    return dict(distribution)
+
+
+def get_top_reviews(sentiment_type: str, top_n: int = 5) -> pd.DataFrame:
+    """Get top N reviews by sentiment and score."""
+    filtered = [
+        item for item in st.session_state.data_cache
+        if item.get("sentiment") == sentiment_type
+    ]
+    
+    if not filtered:
+        return pd.DataFrame()
+    
+    df = pd.DataFrame(filtered)
+    df = df.sort_values("score", ascending=(sentiment_type == "Negative"))
+    df = df[["text", "source", "score", "sentiment"]].head(top_n)
+    
+    return df
+
+
+def get_sentiment_over_time() -> pd.DataFrame:
+    """Prepare data for sentiment trend visualization."""
+    if not st.session_state.data_cache:
+        return pd.DataFrame()
+    
+    df = pd.DataFrame(st.session_state.data_cache)
+    
+    if "received_at" in df.columns:
+        df["received_at"] = pd.to_datetime(df["received_at"], errors="coerce")
+        df = df.sort_values("received_at")
+        
+        # Group by time and sentiment
+        df_grouped = df.groupby([pd.Grouper(key="received_at", freq="1min"), "sentiment"]).size().reset_index(name="count")
+        return df_grouped
+    
+    return pd.DataFrame()
+
+
+def get_source_distribution() -> Dict[str, int]:
+    """Get count of reviews from each source."""
+    distribution = defaultdict(int)
+    
+    for item in st.session_state.data_cache:
+        source = item.get("source", "Unknown")
+        distribution[source] += 1
+    
+    return dict(distribution)
+
+
+# -----------------------
+# UI Layout
+# -----------------------
+
+# Sidebar Controls
+with st.sidebar:
+    st.header("⚙️ Controls")
+
+    # Topic input
+    topic_input = st.text_input(
+        "Enter Topic/Product Name:",
+        value=st.session_state.topic,
+        placeholder="e.g., Pixel 8, iPhone 17, Tesla Model 3",
+        help="Search for sentiment data for any product or topic"
+    )
+    
+    if topic_input != st.session_state.topic:
+        st.session_state.topic = topic_input
+        st.session_state.data_cache.clear()
+        st.session_state.last_update_time = None
+    
+    st.divider()
+    
+    # Streaming controls
+    st.subheader("📡 Streaming")
+    consume_only = st.checkbox("Consume only (don't fetch new data)", value=False)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("▶️ Start Streaming", use_container_width=True):
+            if not st.session_state.topic:
+                st.error("Please enter a topic first!")
+            else:
+                st.session_state.streaming_active = True
+                st.rerun()
+    
+    with col2:
+        if st.button("⏸️ Stop Streaming", use_container_width=True):
+            st.session_state.streaming_active = False
+            st.rerun()
+    
+    refresh_button = st.button(
+        "🔄 Refresh Once",
+        use_container_width=True,
+        help="Manually refresh data from Kafka"
+    )
+    
+    refresh_interval = st.slider(
+        "Refresh interval (seconds):",
+        min_value=3,
+        max_value=30,
+        value=5,
+        step=1
+    )
+    auto_c1, auto_c2 = st.columns(2)
+    with auto_c1:
+        if st.button("⏹️ Stop Auto-Refresh", use_container_width=True, disabled=not st.session_state.auto_refresh):
+            st.session_state.auto_refresh = False
+            st.rerun()
+    with auto_c2:
+        if st.button("▶️ Resume Auto-Refresh", use_container_width=True, disabled=st.session_state.auto_refresh):
+            st.session_state.auto_refresh = True
+            st.rerun()
+    
+    st.divider()
+    
+    # Display stats
+    st.subheader("📊 Stats")
+    st.metric("Cached Items", len(st.session_state.data_cache))
+    
+    if st.session_state.last_update_time:
+        st.caption(f"Last updated: {st.session_state.last_update_time.strftime('%H:%M:%S')}")
+    else:
+        st.caption("Not updated yet")
+    
+    st.divider()
+    
+    st.subheader("ℹ️ Info")
+    st.markdown("""
+    **How it works:**
+    1. Enter a topic name
+    2. Click "Start Streaming"
+    3. Data fetched from Reddit
+    4. Sentiment analyzed with VADER
+    5. Results displayed in real-time
+    
+    **Source:**
+    - 🔴 Reddit posts
+    """)
+
+
+# Main Content
+if not st.session_state.topic:
+    st.info("👈 Enter a topic in the sidebar to get started!")
+else:
+    # Producer and Consumer setup
+    producer = get_kafka_producer()
+    consumer = get_kafka_consumer()
+    
+    # Fetch data if streaming or refresh button clicked
+    if st.session_state.streaming_active or refresh_button:
+        if producer is None or consumer is None:
+            st.error("❌ Kafka connection failed. Make sure Kafka is running on localhost:9092")
+        else:
+            status_placeholder = st.empty()
+            
+            with status_placeholder.container():
+                st.info(f"🔍 Searching for: **{st.session_state.topic}**")
+            
+            # Optionally fetch from Reddit and send to Kafka
+            reddit_sent = reddit_err = 0
+            if not consume_only:
+                reddit_sent, reddit_err = extract_reddit_data(st.session_state.topic, producer)
+            
+            status_placeholder.empty()
+            
+            if not consume_only and reddit_sent > 0:
+                st.toast(f"✅ Extracted {reddit_sent} items from Reddit")
+            
+            # Consume and process
+            processed = process_kafka_messages(consumer)
+            st.caption(f"Kafka polled and processed: {processed} new messages")
+    
+    # Display results
+    if len(st.session_state.data_cache) == 0:
+        st.warning("No data yet. Click 'Start Streaming' or 'Refresh Once' to fetch data.")
+    else:
+        # Key Metrics
+        st.subheader("📈 Sentiment Overview")
+        
+        sentiment_dist = get_sentiment_distribution()
+        source_dist = get_source_distribution()
+        
+        metric_cols = st.columns(4)
+        
+        with metric_cols[0]:
+            total = len(st.session_state.data_cache)
+            st.metric("Total Items", total)
+        
+        with metric_cols[1]:
+            positive_count = sentiment_dist.get("Positive", 0)
+            positive_pct = (positive_count / total * 100) if total > 0 else 0
+            st.metric("😊 Positive", f"{positive_count} ({positive_pct:.1f}%)")
+        
+        with metric_cols[2]:
+            neutral_count = sentiment_dist.get("Neutral", 0)
+            neutral_pct = (neutral_count / total * 100) if total > 0 else 0
+            st.metric("😐 Neutral", f"{neutral_count} ({neutral_pct:.1f}%)")
+        
+        with metric_cols[3]:
+            negative_count = sentiment_dist.get("Negative", 0)
+            negative_pct = (negative_count / total * 100) if total > 0 else 0
+            st.metric("😞 Negative", f"{negative_count} ({negative_pct:.1f}%)")
+        
+        # Visualizations
+        st.divider()
+        st.subheader("📊 Visualizations")
+        
+        viz_tabs = st.tabs([
+            "Sentiment Pie",
+            "Sentiment Trend",
+            "Source Distribution",
+            "Top Reviews (Live)",
+            "History (DB)",
+        ])
+        
+        with viz_tabs[0]:
+            # Sentiment pie chart
+            if sentiment_dist:
+                fig = px.pie(
+                    values=list(sentiment_dist.values()),
+                    names=list(sentiment_dist.keys()),
+                    title=f"Sentiment Distribution for '{st.session_state.topic}'",
+                    color_discrete_map={
+                        "Positive": "#2ecc71",
+                        "Neutral": "#95a5a6",
+                        "Negative": "#e74c3c"
+                    }
+                )
+                fig.update_traces(textposition="inside", textinfo="percent+label")
+                st.plotly_chart(fig, use_container_width=True)
+        
+        with viz_tabs[1]:
+            # Sentiment over time
+            df_time = get_sentiment_over_time()
+            
+            if not df_time.empty:
+                fig = px.bar(
+                    df_time,
+                    x="received_at",
+                    y="count",
+                    color="sentiment",
+                    title="Sentiment Trend Over Time",
+                    color_discrete_map={
+                        "Positive": "#2ecc71",
+                        "Neutral": "#95a5a6",
+                        "Negative": "#e74c3c"
+                    }
+                )
+                fig.update_layout(hovermode="x unified")
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Not enough data for trend visualization yet.")
+        
+        with viz_tabs[2]:
+            # Source distribution (Reddit-only)
+            if source_dist:
+                fig = px.bar(
+                    x=list(source_dist.keys()),
+                    y=list(source_dist.values()),
+                    title="Reviews by Source",
+                    labels={"x": "Source", "y": "Count"},
+                    color=list(source_dist.keys()),
+                    color_discrete_map={
+                        "Reddit": "#ff4500",
+                    }
+                )
+                st.plotly_chart(fig, use_container_width=True)
+        
+        with viz_tabs[3]:
+            # Top reviews (current in-memory cache)
+            review_cols = st.columns(2)
+            
+            with review_cols[0]:
+                st.markdown("### 🟢 Top Positive Reviews")
+                top_positive = get_top_reviews("Positive", 5)
+                
+                if not top_positive.empty:
+                    for idx, row in top_positive.iterrows():
+                        with st.container(border=True):
+                            st.markdown(f"**Source:** {row['source']}")
+                            st.write(row['text'][:200] + "..." if len(row['text']) > 200 else row['text'])
+                            st.caption(f"Score: {row['score']}")
+                else:
+                    st.info("No positive reviews yet.")
+            
+            with review_cols[1]:
+                st.markdown("### 🔴 Top Negative Reviews")
+                top_negative = get_top_reviews("Negative", 5)
+                
+                if not top_negative.empty:
+                    for idx, row in top_negative.iterrows():
+                        with st.container(border=True):
+                            st.markdown(f"**Source:** {row['source']}")
+                            st.write(row['text'][:200] + "..." if len(row['text']) > 200 else row['text'])
+                            st.caption(f"Score: {row['score']}")
+                else:
+                    st.info("No negative reviews yet.")
+
+        with viz_tabs[4]:
+            # Historical summaries and reviews from PostgreSQL
+            st.markdown("### 🕒 Historical Sentiment (PostgreSQL)")
+
+            if not POSTGRES_AVAILABLE:
+                st.info("PostgreSQL integration is not available. Install `psycopg2-binary` and configure PG env vars to enable history.")
+            else:
+                topic = st.session_state.topic
+                if not topic:
+                    st.info("Enter a topic and start streaming to build history.")
+                else:
+                    # Fetch recent summaries
+                    summaries = fetch_topic_summaries(topic, limit=50)
+                    if summaries:
+                        hist_df = pd.DataFrame(
+                            summaries,
+                            columns=[
+                                "id",
+                                "topic",
+                                "summary_ts",
+                                "total_posts",
+                                "positive_count",
+                                "neutral_count",
+                                "negative_count",
+                                "avg_compound_score",
+                            ],
+                        )
+
+                        hist_df["summary_ts"] = pd.to_datetime(hist_df["summary_ts"], errors="coerce")
+                        hist_df = hist_df.sort_values("summary_ts")
+
+                        col_hist1, col_hist2 = st.columns([2, 1])
+
+                        with col_hist1:
+                            st.markdown("#### Trend over time")
+                            fig_hist = px.line(
+                                hist_df,
+                                x="summary_ts",
+                                y="avg_compound_score",
+                                markers=True,
+                                title=f"Average sentiment over time for '{topic}'",
+                            )
+                            fig_hist.update_layout(hovermode="x unified")
+                            st.plotly_chart(fig_hist, use_container_width=True)
+
+                        with col_hist2:
+                            st.markdown("#### Latest snapshot")
+                            latest = hist_df.iloc[[-1]][[
+                                "summary_ts",
+                                "total_posts",
+                                "positive_count",
+                                "neutral_count",
+                                "negative_count",
+                                "avg_compound_score",
+                            ]]
+                            st.dataframe(latest, use_container_width=True)
+
+                        st.markdown("#### Stored top reviews")
+                        hist_cols = st.columns(2)
+
+                        with hist_cols[0]:
+                            st.markdown("**Top positive (historical)**")
+                            pos_rows = fetch_topic_top_reviews(topic, "Positive", limit=5)
+                            if pos_rows:
+                                pos_df = pd.DataFrame(
+                                    pos_rows,
+                                    columns=[
+                                        "summary_id",
+                                        "topic",
+                                        "summary_ts",
+                                        "sentiment",
+                                        "review_text",
+                                        "source",
+                                        "original_score",
+                                        "compound_score",
+                                        "review_rank",
+                                        "external_id",
+                                    ],
+                                )
+                                for _, row in pos_df.iterrows():
+                                    with st.container(border=True):
+                                        st.caption(str(row["summary_ts"]))
+                                        st.markdown(f"**Source:** {row['source'] or 'Unknown'}")
+                                        text = str(row["review_text"])
+                                        st.write(text[:200] + "..." if len(text) > 200 else text)
+                                        st.caption(f"Score: {row['original_score']}, Compound: {row['compound_score']}")
+                            else:
+                                st.info("No historical positive reviews stored yet.")
+
+                        with hist_cols[1]:
+                            st.markdown("**Top negative (historical)**")
+                            neg_rows = fetch_topic_top_reviews(topic, "Negative", limit=5)
+                            if neg_rows:
+                                neg_df = pd.DataFrame(
+                                    neg_rows,
+                                    columns=[
+                                        "summary_id",
+                                        "topic",
+                                        "summary_ts",
+                                        "sentiment",
+                                        "review_text",
+                                        "source",
+                                        "original_score",
+                                        "compound_score",
+                                        "review_rank",
+                                        "external_id",
+                                    ],
+                                )
+                                for _, row in neg_df.iterrows():
+                                    with st.container(border=True):
+                                        st.caption(str(row["summary_ts"]))
+                                        st.markdown(f"**Source:** {row['source'] or 'Unknown'}")
+                                        text = str(row["review_text"])
+                                        st.write(text[:200] + "..." if len(text) > 200 else text)
+                                        st.caption(f"Score: {row['original_score']}, Compound: {row['compound_score']}")
+                            else:
+                                st.info("No historical negative reviews stored yet.")
+                    else:
+                        st.info("No historical snapshots stored yet for this topic. Keep the stream running to accumulate history.")
+        
+        # Raw data table
+        st.divider()
+        st.subheader("📋 Recent Data")
+        
+        if len(st.session_state.data_cache) > 0:
+            df_display = pd.DataFrame(list(st.session_state.data_cache)).iloc[::-1]
+            display_cols = ["source", "text", "sentiment", "compound_score", "score"]
+            available_cols = [col for col in display_cols if col in df_display.columns]
+            
+            st.dataframe(
+                df_display[available_cols].head(20),
+                use_container_width=True,
+                height=400
+            )
+
+
+# Auto-refresh
+if (
+    st.session_state.streaming_active
+    and st.session_state.auto_refresh
+    and len(st.session_state.data_cache) > 0
+):
+    time.sleep(refresh_interval)
+    st.rerun()
+
+---
+File: d:\Sentiment-Analysis\galaxy_s25_sentiment\dashboard\topic_search_app.py
+---
+
+# (File content not included here for brevity; see source file.)
+
+---
+File: d:\Sentiment-Analysis\galaxy_s25_sentiment\extract\extractors.py
+---
+
+"""Wrapper functions for Reddit-only extraction used by the dashboards.
+This module returns Reddit data in a simple, dashboard-friendly format.
+"""
+import os
+from datetime import datetime, timezone
+from dotenv import load_dotenv
+import praw
+
+load_dotenv(override=True)
+
+KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "localhost:9092")
+KAFKA_TOPIC = os.environ.get("KAFKA_TOPIC", "sentiment-stream")
+
+
+def extract_reddit_reviews(query: str, subreddit: str = "all", limit: int = 50):
+    """Extract Reddit posts and return as list - for dashboard use."""
+    try:
+        CLIENT_ID = os.environ.get("REDDIT_CLIENT_ID")
+        CLIENT_SECRET = os.environ.get("REDDIT_CLIENT_SECRET")
+        USER_AGENT = os.environ.get("REDDIT_USER_AGENT", "sentiment_analysis")
+        USERNAME = os.environ.get("REDDIT_USERNAME")
+        PASSWORD = os.environ.get("REDDIT_PASSWORD")
+
+        if not CLIENT_ID or not CLIENT_SECRET:
+            raise RuntimeError("Missing Reddit credentials in environment variables")
+
+        reddit = praw.Reddit(
+            client_id=CLIENT_ID,
+            client_secret=CLIENT_SECRET,
+            user_agent=USER_AGENT,
+            username=USERNAME if USERNAME else None,
+            password=PASSWORD if PASSWORD else None
+        )
+
+        subreddit_obj = reddit.subreddit(subreddit)
+        posts_data = []
+        
+        for post in subreddit_obj.search(query, limit=limit):
+            text = f"{post.title} {post.selftext if post.selftext else ''}".strip()
+            posts_data.append({
+                "id": post.id,
+                "title": post.title,
+                "text": text,
+                "score": post.score,
+                "date": datetime.fromtimestamp(post.created_utc, tz=timezone.utc).isoformat(),
+                "source": "reddit",
+                "subreddit": subreddit
+            })
+        
+        return posts_data
+    except Exception as e:
+        print(f"Error extracting Reddit posts: {e}")
+        return []
+
+---
+File: d:\Sentiment-Analysis\galaxy_s25_sentiment\extract\kafka_utils.py
+---
+
+"""Kafka utilities for real-time sentiment analysis."""
+
+import json
+import os
+from typing import Dict, List
+
+try:
+    from kafka import KafkaConsumer, KafkaProducer
+except ImportError:
+    KafkaConsumer = None
+    KafkaProducer = None
+
+
+class KafkaManager:
+    """Manages Kafka producer and consumer operations."""
+    
+    def __init__(self, bootstrap_servers: str = None, topic: str = None):
+        self.bootstrap_servers = bootstrap_servers or os.environ.get("KAFKA_BOOTSTRAP", "localhost:9092")
+        self.topic = topic or os.environ.get("KAFKA_TOPIC", "sentiment-stream")
+        self.producer = None
+        self.consumer = None
+    
+    def get_producer(self) -> 'KafkaProducer':
+        """Get or create Kafka producer."""
+        if self.producer is None:
+            if KafkaProducer is None:
+                raise RuntimeError("kafka-python not installed")
+            
+            try:
+                self.producer = KafkaProducer(
+                    bootstrap_servers=self.bootstrap_servers,
+                    value_serializer=lambda v: json.dumps(v, default=str).encode("utf-8"),
+                    retries=3,
+                )
+            except Exception as e:
+                raise RuntimeError(f"Failed to create Kafka producer: {e}")
+        
+        return self.producer
+    
+    def get_consumer(self, group_id: str = "sentiment-dashboard") -> 'KafkaConsumer':
+        """Get or create Kafka consumer."""
+        if self.consumer is None:
+            if KafkaConsumer is None:
+                raise RuntimeError("kafka-python not installed")
+            
+            try:
+                self.consumer = KafkaConsumer(
+                    self.topic,
+                    bootstrap_servers=self.bootstrap_servers,
+                    auto_offset_reset="latest",
+                    enable_auto_commit=True,
+                    group_id=group_id,
+                    value_deserializer=lambda m: json.loads(m.decode("utf-8")),
+                    consumer_timeout_ms=1000,
+                )
+            except Exception as e:
+                raise RuntimeError(f"Failed to create Kafka consumer: {e}")
+        
+        return self.consumer
+    
+    def send_message(self, data: Dict) -> bool:
+        """Send a single message to Kafka."""
+        try:
+            producer = self.get_producer()
+            producer.send(self.topic, value=data)
+            producer.flush()
+            return True
+        except Exception as e:
+            print(f"Error sending to Kafka: {e}")
+            return False
+    
+    def consume_messages(self, max_records: int = 100) -> List[Dict]:
+        """Consume messages from Kafka."""
+        try:
+            consumer = self.get_consumer()
+            messages = []
+            polled_data = consumer.poll(timeout_ms=500, max_records=max_records)
+            
+            for partition_records in polled_data.values():
+                for message in partition_records:
+                    messages.append(message.value)
+            
+            return messages
+        except Exception as e:
+            print(f"Error consuming from Kafka: {e}")
+            return []
+    
+    def close(self):
+        """Close producer and consumer."""
+        if self.producer:
+            self.producer.close()
+        if self.consumer:
+            self.consumer.close()
+
+---
+File: d:\Sentiment-Analysis\galaxy_s25_sentiment\extract\multi_source_extract.py
+---
+
+"""Extract Reddit posts and send them to Kafka."""
+
+import json
+import os
+import sys
+import argparse
+from datetime import datetime
+from dotenv import load_dotenv
+
+# Load environment variables first, before importing
+load_dotenv(override=True)
+
+import praw
+
+try:
+    from kafka import KafkaProducer
+except ImportError:
+    KafkaProducer = None
+
+# ------------------------
+# Kafka Config
+# ------------------------
+KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "localhost:9092")
+KAFKA_TOPIC = os.environ.get("KAFKA_TOPIC", "sentiment-stream")
+
+
+def make_producer(bootstrap_servers: str):
+    if KafkaProducer is None:
+        raise RuntimeError("Install kafka-python to enable Kafka integration")
+    return KafkaProducer(
+        bootstrap_servers=bootstrap_servers,
+        value_serializer=lambda v: json.dumps(v).encode("utf-8"),
+        retries=5
+    )
+
+
+# ------------------------
+# Reddit Extraction
+# ------------------------
+def extract_reddit(producer, query, subreddit="all", count=50):
+    """Extract Reddit posts for any query/subreddit."""
+    sent = 0
+    try:
+        CLIENT_ID = os.environ.get("REDDIT_CLIENT_ID")
+        CLIENT_SECRET = os.environ.get("REDDIT_CLIENT_SECRET")
+        USER_AGENT = os.environ.get("REDDIT_USER_AGENT", "sentiment_analysis")
+        USERNAME = os.environ.get("REDDIT_USERNAME")
+        PASSWORD = os.environ.get("REDDIT_PASSWORD")
+
+        if not CLIENT_ID or not CLIENT_SECRET:
+            raise RuntimeError("❌ Missing Reddit credentials in environment variables")
+
+        reddit = praw.Reddit(
+            client_id=CLIENT_ID,
+            client_secret=CLIENT_SECRET,
+            user_agent=USER_AGENT,
+            username=USERNAME if USERNAME else None,
+            password=PASSWORD if PASSWORD else None
+        )
+
+        subreddit_obj = reddit.subreddit(subreddit)
+        posts = subreddit_obj.search(query, limit=count)
+        
+        for post in posts:
+            text = f"{post.title} {post.selftext if post.selftext else ''}".strip()
+            timestamp = datetime.fromtimestamp(post.created_utc).isoformat()
+            data = {
+                "id": post.id,
+                "title": post.title,
+                "text": text,
+                "score": post.score,
+                "at": timestamp,
+                "timestamp": timestamp,
+                "source": "reddit",
+                "topic": query,
+                "subreddit": subreddit
+            }
+            try:
+                producer.send(KAFKA_TOPIC, value=data)
+                sent += 1
+            except Exception as e:
+                print(f"Failed to send Reddit post to Kafka: {e}")
+        return sent
+    except Exception as exc:
+        print(f"❌ Error extracting Reddit posts: {exc}")
+        return 0
+
+
+# ------------------------
+# Main Function
+# ------------------------
+def main():
+    parser = argparse.ArgumentParser(description="Extract Reddit posts and send to Kafka")
+    parser.add_argument("--topic", type=str, required=True, help="Search topic for Reddit")
+    parser.add_argument("--subreddit", type=str, default="all", help="Reddit subreddit (default: all)")
+    parser.add_argument("--count", type=int, default=50, help="Number of records to fetch (default: 50)")
+    
+    args = parser.parse_args()
+    
+    producer = make_producer(KAFKA_BOOTSTRAP)
+    reddit_sent = extract_reddit(producer, args.topic, args.subreddit, args.count)
+    producer.flush()
+    
+    if reddit_sent:
+        print(f"✅ Sent {reddit_sent} Reddit posts to Kafka")
+    else:
+        print("⚠️ No Reddit posts available for this keyword")
+    
+    print("✅ Extraction complete")
+
+
+if __name__ == "__main__":
+    main()
+
+---
+File: d:\Sentiment-Analysis\galaxy_s25_sentiment\load\postgres_utils.py
+---
+
+"""PostgreSQL utilities for storing and querying sentiment summaries and reviews.
+
+This module is designed to be imported from Streamlit dashboards or
+other services that process Kafka messages.
+
+It assumes a PostgreSQL instance is reachable using standard
+environment variables and uses a small connection pool.
+"""
+
+from __future__ import annotations
+
+import os
+from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import datetime
+from statistics import mean
+from typing import Iterable, List, Mapping, Optional, Tuple
+
+from dotenv import load_dotenv
+
+# Load env so local development works without extra wiring
+load_dotenv(override=True)
+
+try:  # Optional dependency to avoid breaking non‑DB environments
+    import psycopg2
+    from psycopg2.pool import SimpleConnectionPool
+
+    PSYCOPG2_AVAILABLE = True
+except Exception:  # pragma: no cover - only hit when psycopg2 missing
+    psycopg2 = None  # type: ignore
+    SimpleConnectionPool = None  # type: ignore
+    PSYCOPG2_AVAILABLE = False
+
+
+# ----------------------------
+# Configuration
+# ----------------------------
+
+
+@dataclass
+class PostgresConfig:
+    host: str
+    port: int
+    database: str
+    user: str
+    password: str
+    sslmode: Optional[str] = None
+
+    @classmethod
+    def from_env(cls) -> "PostgresConfig":
+        """Load PostgreSQL connection settings from environment.
+
+        Supports both the standard libpq env vars and project‑specific
+        fallbacks so it works on most setups without changes.
+        """
+
+        host = os.environ.get("PGHOST") or os.environ.get("PG_HOST", "localhost")
+        port = int(os.environ.get("PGPORT") or os.environ.get("PG_PORT", "5432"))
+        database = os.environ.get("PGDATABASE") or os.environ.get("PG_DB", "sentiment_db")
+        user = os.environ.get("PGUSER") or os.environ.get("PG_USER", "sentiment_user")
+        password = os.environ.get("PGPASSWORD") or os.environ.get("PG_PASSWORD", "changeme")
+        sslmode = os.environ.get("PGSSLMODE") or os.environ.get("PG_SSLMODE")
+
+        return cls(host=host, port=port, database=database, user=user, password=password, sslmode=sslmode)
+
+
+_pool: Optional["SimpleConnectionPool"] = None
+_db_initialized: bool = False
+
+
+def _ensure_pool() -> Optional["SimpleConnectionPool"]:
+    """Initialise the global connection pool lazily.
+
+    Returns None if psycopg2 is not installed so that callers can
+    gracefully no‑op in environments without PostgreSQL.
+    """
+
+    global _pool
+    if not PSYCOPG2_AVAILABLE:
+        return None
+
+    if _pool is None:
+        cfg = PostgresConfig.from_env()
+        conn_kwargs = dict(
+            host=cfg.host,
+            port=cfg.port,
+            dbname=cfg.database,
+            user=cfg.user,
+            password=cfg.password,
+        )
+        if cfg.sslmode:
+            conn_kwargs["sslmode"] = cfg.sslmode
+
+        try:
+            _pool = SimpleConnectionPool(
+                minconn=1,
+                maxconn=int(os.environ.get("PG_POOL_MAX", "5")),
+                **conn_kwargs,
+            )
+        except Exception:
+            # If the server is not reachable, leave pool as None so callers
+            # can decide how to degrade (e.g. return empty history).
+            _pool = None
+
+    return _pool
+
+
+@contextmanager
+def get_cursor():
+    """Context manager that yields (conn, cursor) and commits/rolls back.
+
+    Usage:
+
+        with get_cursor() as (conn, cur):
+            cur.execute(...)
+    """
+
+    pool = _ensure_pool()
+    if pool is None:
+        # psycopg2 not available or pool not initialised; behave as no‑op
+        raise RuntimeError("PostgreSQL connection pool is not available. Install psycopg2-binary and configure env vars.")
+
+    conn = pool.getconn()
+    try:
+        cur = conn.cursor()
+        try:
+            yield conn, cur
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            cur.close()
+    finally:
+        pool.putconn(conn)
+
+
+# ----------------------------
+# Schema management
+# ----------------------------
+
+
+SUMMARY_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS topic_sentiment_summary (
+    id                  BIGSERIAL PRIMARY KEY,
+    topic               TEXT        NOT NULL,
+    summary_ts          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    total_posts         INTEGER     NOT NULL,
+    positive_count      INTEGER     NOT NULL,
+    neutral_count       INTEGER     NOT NULL,
+    negative_count      INTEGER     NOT NULL,
+    avg_compound_score  NUMERIC(5,4) NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_topic_summary_topic_ts
+    ON topic_sentiment_summary (topic, summary_ts DESC);
+"""
+
+
+REVIEWS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS topic_reviews (
+    id              BIGSERIAL PRIMARY KEY,
+    summary_id      BIGINT      NOT NULL REFERENCES topic_sentiment_summary(id) ON DELETE CASCADE,
+    topic           TEXT        NOT NULL,
+    summary_ts      TIMESTAMPTZ NOT NULL,
+    sentiment       VARCHAR(16) NOT NULL,
+    review_text     TEXT        NOT NULL,
+    source          VARCHAR(64),
+    original_score  NUMERIC(10,2),
+    compound_score  NUMERIC(5,4),
+    review_rank     SMALLINT    NOT NULL,
+    external_id     TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_topic_reviews_topic_sentiment_ts
+    ON topic_reviews (topic, sentiment, summary_ts DESC);
+"""
+
+
+def init_db() -> None:
+    """Create tables if they do not exist.
+
+    Safe to call multiple times; uses IF NOT EXISTS.
+    """
+
+    global _db_initialized
+
+    if not PSYCOPG2_AVAILABLE:
+        return
+
+    if _db_initialized:
+        return
+
+    with get_cursor() as (_, cur):
+        cur.execute(SUMMARY_TABLE_SQL)
+        cur.execute(REVIEWS_TABLE_SQL)
+
+    _db_initialized = True
+
+
+# ----------------------------
+# Aggregation helpers
+# ----------------------------
+
+
+def _compute_summary(topic: str, messages: Iterable[Mapping]) -> Optional[Tuple[int, int, int, int, float]]:
+    """Compute total/pos/neu/neg and average compound score for a topic.
+
+    Expects each message to have `sentiment` and `compound_score` keys.
+    """
+
+    filtered: List[Mapping] = [m for m in messages if not topic or m.get("topic", topic) == topic]
+    if not filtered:
+        return None
+
+    total = len(filtered)
+    positive = sum(1 for m in filtered if str(m.get("sentiment")) == "Positive")
+    negative = sum(1 for m in filtered if str(m.get("sentiment")) == "Negative")
+    neutral = sum(1 for m in filtered if str(m.get("sentiment")) == "Neutral")
+
+    compounds: List[float] = []
+    for m in filtered:
+        try:
+            compounds.append(float(m.get("compound_score", 0.0) or 0.0))
+        except (TypeError, ValueError):
+            compounds.append(0.0)
+
+    avg_compound = float(mean(compounds)) if compounds else 0.0
+    return total, positive, neutral, negative, avg_compound
+
+
+def _get_top_reviews(messages: Iterable[Mapping], sentiment: str, top_n: int = 5) -> List[Mapping]:
+    """Return top N reviews for a sentiment label, ordered by compound score.
+
+    For positive reviews we sort descending by compound score; for
+    negative reviews ascending (most negative first).
+    """
+
+    filtered: List[Mapping] = [m for m in messages if str(m.get("sentiment")) == sentiment]
+    if not filtered:
+        return []
+
+    reverse = sentiment == "Positive"
+    sorted_msgs = sorted(
+        filtered,
+        key=lambda m: float(m.get("compound_score", 0.0) or 0.0),
+        reverse=reverse,
+    )
+    return sorted_msgs[:top_n]
+
+
+# ----------------------------
+# Public API: store snapshot
+# ----------------------------
+
+
+def store_topic_snapshot(topic: str, messages: Iterable[Mapping], top_n: int = 5) -> Optional[int]:
+    """Persist a snapshot summary and top reviews for a topic.
+
+    This is intended to be called from the Kafka consumer loop or
+    dashboard after new messages have been processed.
+
+    Returns the created summary_id, or None if nothing was stored.
+    """
+
+    if not PSYCOPG2_AVAILABLE:
+        # Allow dashboards to run without PostgreSQL installed
+        return None
+
+    # Ensure tables exist before we attempt to write. If the DB is not
+    # reachable, swallow the error so the live dashboard keeps working.
+    try:
+        init_db()
+    except Exception:
+        return None
+
+    computed = _compute_summary(topic, messages)
+    if computed is None:
+        return None
+
+    total, positive, neutral, negative, avg_compound = computed
+
+    snapshot_ts = datetime.utcnow()
+    top_pos = _get_top_reviews(messages, "Positive", top_n)
+    top_neg = _get_top_reviews(messages, "Negative", top_n)
+
+    try:
+        with get_cursor() as (_, cur):
+            # Insert summary row
+            cur.execute(
+                """
+                INSERT INTO topic_sentiment_summary (
+                    topic, summary_ts, total_posts,
+                    positive_count, neutral_count, negative_count,
+                    avg_compound_score
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                RETURNING id, summary_ts
+                """,
+                (topic, snapshot_ts, total, positive, neutral, negative, avg_compound),
+            )
+            summary_id, db_ts = cur.fetchone()
+
+            # Helper to insert a batch of reviews for one sentiment
+            def insert_reviews(batch: List[Mapping], label: str) -> None:
+                if not batch:
+                    return
+                values = []
+                for rank, m in enumerate(batch, start=1):
+                    text = str(m.get("text") or m.get("title") or "").strip()
+                    source = m.get("source") or None
+                    ext_id = m.get("id") or None
+                    try:
+                        original_score = float(m.get("score")) if m.get("score") is not None else None
+                    except (TypeError, ValueError):
+                        original_score = None
+                    try:
+                        compound = float(m.get("compound_score", 0.0) or 0.0)
+                    except (TypeError, ValueError):
+                        compound = 0.0
+
+                    if not text:
+                        continue
+
+                    values.append(
+                        (
+                            summary_id,
+                            topic,
+                            db_ts,
+                            label,
+                            text,
+                            source,
+                            original_score,
+                            compound,
+                            rank,
+                            ext_id,
+                        )
+                    )
+
+                if not values:
+                    return
+
+                cur.executemany(
+                    """
+                    INSERT INTO topic_reviews (
+                        summary_id, topic, summary_ts,
+                        sentiment, review_text, source,
+                        original_score, compound_score, review_rank, external_id
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    values,
+                )
+
+            insert_reviews(top_pos, "Positive")
+            insert_reviews(top_neg, "Negative")
+
+            return int(summary_id)
+    except Exception:
+        # Any connection/DB error should not break the streaming UI
+        return None
+
+
+# ----------------------------
+# Public API: history queries
+# ----------------------------
+
+
+def fetch_topic_summaries(topic: str, limit: int = 100) -> List[Tuple]:
+    """Fetch recent summary rows for a topic ordered by time descending.
+
+    Returns a list of tuples matching the topic_sentiment_summary columns
+    in natural order.
+    """
+
+    if not PSYCOPG2_AVAILABLE:
+        return []
+
+    try:
+        with get_cursor() as (_, cur):
+            cur.execute(
+                """
+                SELECT
+                    id,
+                    topic,
+                    summary_ts,
+                    total_posts,
+                    positive_count,
+                    neutral_count,
+                    negative_count,
+                    avg_compound_score
+                FROM topic_sentiment_summary
+                WHERE topic = %s
+                ORDER BY summary_ts DESC
+                LIMIT %s
+                """,
+                (topic, limit),
+            )
+            return list(cur.fetchall())
+    except Exception:
+        # If DB is down, just return no history instead of crashing.
+        return []
+
+
+def fetch_topic_top_reviews(topic: str, sentiment: str, limit: int = 50) -> List[Tuple]:
+    """Fetch historical top reviews for a topic and sentiment label."""
+
+    if not PSYCOPG2_AVAILABLE:
+        return []
+
+    try:
+        with get_cursor() as (_, cur):
+            cur.execute(
+                """
+                SELECT
+                    summary_id,
+                    topic,
+                    summary_ts,
+                    sentiment,
+                    review_text,
+                    source,
+                    original_score,
+                    compound_score,
+                    review_rank,
+                    external_id
+                FROM topic_reviews
+                WHERE topic = %s AND sentiment = %s
+                ORDER BY summary_ts DESC, review_rank ASC
+                LIMIT %s
+                """,
+                (topic, sentiment, limit),
+            )
+            return list(cur.fetchall())
+    except Exception:
+        return []
+
+---
+File: d:\Sentiment-Analysis\galaxy_s25_sentiment\load\save_to_db.py
+---
+
+# Save processed data to database
+import sqlite3
+import pandas as pd
+
+# Load sentiment data
+df = pd.read_csv("data/sentiment_tweets.csv")
+
+# Connect to SQLite (creates file if not exists)
+conn = sqlite3.connect("data/sentiment_analysis.db")
+
+# Save to table
+df.to_sql("tweets_sentiment", conn, if_exists="replace", index=False)
+
+# Confirm row count
+rows = conn.execute("SELECT COUNT(*) FROM tweets_sentiment").fetchone()[0]
+print(f"✅ Data loaded into SQLite. Total rows: {rows}")
+
+conn.close()
+
+README
+======
+
+---
+File: d:\Sentiment-Analysis\README.md
+---
+
+# Realtime Sentiment Analysis
+
+This project extracts, transforms, analyzes, and visualizes sentiment data using the Reddit live api
+
+---
+File: d:\Sentiment-Analysis\galaxy_s25_sentiment\README.md
+---
+
+# Sentiment Analysis Project
+
+This project extracts, transforms, analyzes, and visualizes sentiment data from multiple sources for any target product or topic.
+
+Additional Notes
+================
+
+Setup Instructions
+------------------
+
+- Ensure Python 3.10+ (3.13.5 recommended) is installed.
+- Create and activate a virtual environment (example for PowerShell):
+  - python -m venv venv
+  - .\venv\Scripts\Activate.ps1
+- Install dependencies:
+  - pip install -r requirements.txt
+  - pip install -r galaxy_s25_sentiment/requirements.txt
+- Configure environment variables by copying .env.example to .env and filling in:
+  - Reddit credentials: REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USER_AGENT, REDDIT_USERNAME, REDDIT_PASSWORD (optional)
+  - Kafka settings: KAFKA_BOOTSTRAP (default localhost:9092), KAFKA_TOPIC (default sentiment-stream)
+  - PostgreSQL settings if using history: PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD, PGSSLMODE (optional)
+
+Dependencies
+------------
+
+- Streamlit (dashboard UI)
+- Plotly (charts and visualizations)
+- kafka-python (Kafka producer/consumer)
+- praw (Reddit API)
+- vaderSentiment (sentiment analysis)
+- textblob (alternative sentiment analysis for Spark job)
+- pyspark (Spark streaming job)
+- pandas, numpy (data processing)
+- python-dotenv (environment variable management)
+- psycopg2-binary (PostgreSQL integration for history, optional)
+- sqlite3 (standard library, used in save_to_db.py)
+
+Usage Examples
+--------------
+
+- Verify real-time dashboard setup:
+  - python verify_realtime_setup.py
+- Start Kafka using Docker Compose:
+  - docker-compose up -d
+- Run the main real-time Streamlit dashboard (from project root):
+  - streamlit run galaxy_s25_sentiment/dashboard/realtime_dashboard.py
+- Run the legacy/demo Kafka dashboard:
+  - streamlit run galaxy_s25_sentiment/dashboard/kafka_realtime_app.py
+- Run the Kafka Spark streaming sentiment job:
+  - python streaming_sentiment.py
+- Run the Reddit-to-Kafka extractor directly:
+  - python galaxy_s25_sentiment/extract/multi_source_extract.py --topic "example-topic" --subreddit "all" --count 50
+- Save processed tweet sentiment data to SQLite:
+  - python galaxy_s25_sentiment/load/save_to_db.py
