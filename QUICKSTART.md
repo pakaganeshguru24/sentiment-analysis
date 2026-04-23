@@ -184,7 +184,8 @@ REDDIT_CLIENT_SECRET=your_secret
 REDDIT_USER_AGENT=YourApp/1.0
 ```
 
-Get from: https://www.reddit.com/prefs/apps
+Get these from your own Reddit app at: https://www.reddit.com/prefs/apps
+Keep `.env` local and do not commit it.
 
 ### Change Kafka Settings
 Edit `.env`:

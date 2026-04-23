@@ -69,6 +69,7 @@ KAFKA_TOPIC=sentiment-stream
 ### Step 3: Configure Reddit API (Recommended but Optional)
 
 To enable Reddit extraction:
+1. Create your own Reddit app and use your own credentials, not the project owner's.
 1. Go to: https://www.reddit.com/prefs/apps
 2. Click: "Create Application" or "Create Another App"
 3. Select: **"script"** type
@@ -78,6 +79,7 @@ To enable Reddit extraction:
    - About URL: (leave empty or enter project URL)
 5. Click: "Create app"
 6. Copy the credentials to `.env`:
+   - Keep `.env` local only and never commit it.
 
 ```
 REDDIT_CLIENT_ID=<your_client_id>

@@ -148,7 +148,7 @@ pip install -r galaxy_s25_sentiment/requirements.txt
 ### Step 3: Configure Environment
 ```powershell
 cp .env.example .env
-# Edit .env with your Reddit credentials (optional)
+# Edit .env with your own Reddit app credentials (optional)
 ```
 
 ### Step 4: Verify Setup
